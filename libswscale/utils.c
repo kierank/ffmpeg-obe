@@ -281,11 +281,10 @@ static const ScaleAlgorithm scale_algorithms[] = {
 };
 
 static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
-                              int *outFilterSize, int xInc, int srcW,
-                              int dstW, int filterAlign, int one,
-                              int flags, int cpu_flags,
+                              int *outFilterSize, int xInc, int srcW, int dstW,
+                              int filterAlign, int one, int flags, int cpu_flags,
                               SwsVector *srcFilter, SwsVector *dstFilter,
-                              double param[2], int srcPos, int dstPos)
+                              double param[2], int srcPos, int dstPos, int *needs_scale)
 {
     int i;
     int filterSize;
@@ -301,6 +300,7 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
     // NOTE: the +3 is for the MMX(+1) / SSE(+3) scaler which reads over the end
     FF_ALLOC_OR_GOTO(NULL, *filterPos, (dstW + 3) * sizeof(**filterPos), fail);
 
+    *needs_scale = 1;
     if (FFABS(xInc - 0x10000) < 10 && srcPos == dstPos) { // unscaled
         int i;
         filterSize = 1;
@@ -311,6 +311,7 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
             filter[i * filterSize] = fone;
             (*filterPos)[i]        = i;
         }
+        *needs_scale = 0;
     } else if (flags & SWS_POINT) { // lame looking point sampling mode
         int i;
         int64_t xDstInSrc;
@@ -1454,7 +1455,8 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                            cpu_flags, srcFilter->lumH, dstFilter->lumH,
                            c->param,
                            get_local_pos(c, 0, 0, 0),
-                           get_local_pos(c, 0, 0, 0)) < 0)
+                           get_local_pos(c, 0, 0, 0),
+                           &c->needs_hyscale) < 0)
                 goto fail;
             if (initFilter(&c->hChrFilter, &c->hChrFilterPos,
                            &c->hChrFilterSize, c->chrXInc,
@@ -1463,7 +1465,8 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                            cpu_flags, srcFilter->chrH, dstFilter->chrH,
                            c->param,
                            get_local_pos(c, c->chrSrcHSubSample, c->src_h_chr_pos, 0),
-                           get_local_pos(c, c->chrDstHSubSample, c->dst_h_chr_pos, 0)) < 0)
+                           get_local_pos(c, c->chrDstHSubSample, c->dst_h_chr_pos, 0),
+                           &c->needs_hcscale) < 0)
                 goto fail;
         }
     } // initialize horizontal stuff
@@ -1479,7 +1482,8 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                        cpu_flags, srcFilter->lumV, dstFilter->lumV,
                        c->param,
                        get_local_pos(c, 0, 0, 1),
-                       get_local_pos(c, 0, 0, 1)) < 0)
+                       get_local_pos(c, 0, 0, 1),
+                       &c->needs_vyscale) < 0)
             goto fail;
         if (initFilter(&c->vChrFilter, &c->vChrFilterPos, &c->vChrFilterSize,
                        c->chrYInc, c->chrSrcH, c->chrDstH,
@@ -1488,8 +1492,8 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                        cpu_flags, srcFilter->chrV, dstFilter->chrV,
                        c->param,
                        get_local_pos(c, c->chrSrcVSubSample, c->src_v_chr_pos, 1),
-                       get_local_pos(c, c->chrDstVSubSample, c->dst_v_chr_pos, 1)) < 0)
-
+                       get_local_pos(c, c->chrDstVSubSample, c->dst_v_chr_pos, 1),
+                       &c->needs_vcscale) < 0)
             goto fail;
 
 #if HAVE_ALTIVEC
