@@ -147,6 +147,12 @@ static av_cold int pulse_close(AVFormatContext *s)
     return 0;
 }
 
+static int pulse_get_device_list(AVFormatContext *h, AVDeviceInfoList *device_list)
+{
+    PulseData *s = h->priv_data;
+    return ff_pulse_audio_get_devices(device_list, s->server, 0);
+}
+
 #define OFFSET(a) offsetof(PulseData, a)
 #define D AV_OPT_FLAG_DECODING_PARAM
 
@@ -166,6 +172,7 @@ static const AVClass pulse_demuxer_class = {
     .item_name      = av_default_item_name,
     .option         = options,
     .version        = LIBAVUTIL_VERSION_INT,
+    .category       = AV_CLASS_CATEGORY_DEVICE_AUDIO_INPUT,
 };
 
 AVInputFormat ff_pulse_demuxer = {
@@ -175,6 +182,7 @@ AVInputFormat ff_pulse_demuxer = {
     .read_header    = pulse_read_header,
     .read_packet    = pulse_read_packet,
     .read_close     = pulse_close,
+    .get_device_list = pulse_get_device_list,
     .flags          = AVFMT_NOFILE,
     .priv_class     = &pulse_demuxer_class,
 };

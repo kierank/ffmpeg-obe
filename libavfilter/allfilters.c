@@ -122,6 +122,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(CURVES,         curves,         vf);
     REGISTER_FILTER(DCTDNOIZ,       dctdnoiz,       vf);
     REGISTER_FILTER(DECIMATE,       decimate,       vf);
+    REGISTER_FILTER(DEJUDDER,       dejudder,       vf);
     REGISTER_FILTER(DELOGO,         delogo,         vf);
     REGISTER_FILTER(DESHAKE,        deshake,        vf);
     REGISTER_FILTER(DRAWBOX,        drawbox,        vf);
@@ -188,6 +189,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(SETSAR,         setsar,         vf);
     REGISTER_FILTER(SETTB,          settb,          vf);
     REGISTER_FILTER(SHOWINFO,       showinfo,       vf);
+    REGISTER_FILTER(SHUFFLEPLANES,  shuffleplanes,  vf);
     REGISTER_FILTER(SMARTBLUR,      smartblur,      vf);
     REGISTER_FILTER(SPLIT,          split,          vf);
     REGISTER_FILTER(SPP,            spp,            vf);

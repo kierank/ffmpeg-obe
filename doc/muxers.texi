@@ -23,6 +23,8 @@ A description of some of the currently available muxers follows.
 
 Audio Interchange File Format muxer.
 
+@subsection Options
+
 It accepts the following options:
 
 @table @option
@@ -49,6 +51,10 @@ The output of the muxer consists of a single line of the form:
 CRC=0x@var{CRC}, where @var{CRC} is a hexadecimal number 0-padded to
 8 digits containing the CRC for all the decoded input frames.
 
+See also the @ref{framecrc} muxer.
+
+@subsection Examples
+
 For example to compute the CRC of the input, and store it in the file
 @file{out.crc}:
 @example
@@ -68,8 +74,6 @@ and the input video converted to MPEG-2 video, use the command:
 ffmpeg -i INPUT -c:a pcm_u8 -c:v mpeg2video -f crc -
 @end example
 
-See also the @ref{framecrc} muxer.
-
 @anchor{framecrc}
 @section framecrc
 
@@ -88,6 +92,8 @@ packet of the form:
 
 @var{CRC} is a hexadecimal number 0-padded to 8 digits containing the
 CRC of the packet.
+
+@subsection Examples
 
 For example to compute the CRC of the audio and video frames in
 @file{INPUT}, converted to raw audio and video packets, and store it
@@ -131,6 +137,8 @@ packet of the form:
 
 @var{MD5} is a hexadecimal number representing the computed MD5 hash
 for the packet.
+
+@subsection Examples
 
 For example to compute the MD5 of the audio and video frames in
 @file{INPUT}, converted to raw audio and video packets, and store it
@@ -199,6 +207,8 @@ ffmpeg -i in.nut out.m3u8
 See also the @ref{segment} muxer, which provides a more generic and
 flexible implementation of a segmenter, and can be used to perform HLS
 segmentation.
+
+@subsection Options
 
 This muxer supports the following options:
 
@@ -292,6 +302,8 @@ The pattern "img%%-%d.jpg" will specify a sequence of filenames of the
 form @file{img%-1.jpg}, @file{img%-2.jpg}, ..., @file{img%-10.jpg},
 etc.
 
+@subsection Examples
+
 The following example shows how to use @command{ffmpeg} for creating a
 sequence of files @file{img-001.jpeg}, @file{img-002.jpeg}, ...,
 taking one image every second from the input video:
@@ -354,6 +366,8 @@ Matroska container muxer.
 
 This muxer implements the matroska and webm container specs.
 
+@subsection Metadata
+
 The recognized metadata settings in this muxer are:
 
 @table @option
@@ -411,6 +425,8 @@ For example a 3D WebM clip can be created using the following command line:
 ffmpeg -i sample_left_right_clip.mpg -an -c:v libvpx -metadata stereo_mode=left_right -y stereo_clip.webm
 @end example
 
+@subsection Options
+
 This muxer supports the following options:
 
 @table @option
@@ -457,7 +473,7 @@ ffmpeg -i INPUT -f md5 -
 
 See also the @ref{framemd5} muxer.
 
-@section mov/mp4/ismv
+@section mov, mp4, ismv
 
 MOV/MP4/ISMV (Smooth Streaming) muxer.
 
@@ -474,6 +490,8 @@ it is not properly finished), and it requires less memory when writing
 very long files (since writing normal MOV/MP4 files stores info about
 every single packet in memory until the file is closed). The downside
 is that it is less compatible with other applications.
+
+@subsection Options
 
 Fragmentation is enabled by setting one of the AVOptions that define
 how to cut the file into fragments:
@@ -531,6 +549,8 @@ as fragmented output, thus it is not enabled by default.
 Add RTP hinting tracks to the output file.
 @end table
 
+@subsection Example
+
 Smooth Streaming content can be pushed in real time to a publishing
 point on IIS with this muxer. Example:
 @example
@@ -541,12 +561,15 @@ ffmpeg -re @var{<normal input/transcoding options>} -movflags isml+frag_keyframe
 
 The MP3 muxer writes a raw MP3 stream with an ID3v2 header at the beginning and
 optionally an ID3v1 tag at the end. ID3v2.3 and ID3v2.4 are supported, the
-@code{id3v2_version} option controls which one is used. The legacy ID3v1 tag is
-not written by default, but may be enabled with the @code{write_id3v1} option.
+@code{id3v2_version} option controls which one is used. Setting
+@code{id3v2_version} to 0 will disable the ID3v2 header completely. The legacy
+ID3v1 tag is not written by default, but may be enabled with the
+@code{write_id3v1} option.
 
-For seekable output the muxer also writes a Xing frame at the beginning, which
-contains the number of frames in the file. It is useful for computing duration
-of VBR files.
+The muxer may also write a Xing frame at the beginning, which contains the
+number of frames in the file. It is useful for computing duration of VBR files.
+The Xing frame is written if the output stream is seekable and if the
+@code{write_xing} option is set to 1 (the default).
 
 The muxer supports writing ID3v2 attached pictures (APIC frames). The pictures
 are supplied to the muxer in form of a video stream with a single packet. There
@@ -573,11 +596,23 @@ ffmpeg -i input.mp3 -i cover.png -c copy -map 0 -map 1
 -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (Front)" out.mp3
 @end example
 
+Write a "clean" MP3 without any extra features:
+@example
+ffmpeg -i input.wav -write_xing 0 -id3v2_version 0 out.mp3
+@end example
+
 @section mpegts
 
 MPEG transport stream muxer.
 
 This muxer implements ISO 13818-1 and part of ETSI EN 300 468.
+
+The recognized metadata settings in mpegts muxer are @code{service_provider}
+and @code{service_name}. If they are not set the default for
+@code{service_provider} is "FFmpeg" and the default for
+@code{service_name} is "Service01".
+
+@subsection Options
 
 The muxer options are:
 
@@ -631,10 +666,7 @@ Reemit PAT/PMT before writing the next packet.
 Use LATM packetization for AAC.
 @end table
 
-The recognized metadata settings in mpegts muxer are @code{service_provider}
-and @code{service_name}. If they are not set the default for
-@code{service_provider} is "FFmpeg" and the default for
-@code{service_name} is "Service01".
+@subsection Example
 
 @example
 ffmpeg -i file.mpg -c copy \
@@ -719,12 +751,14 @@ files.
 See also the @ref{hls} muxer, which provides a more specific
 implementation for HLS segmentation.
 
+@subsection Options
+
 The segment muxer supports the following options:
 
 @table @option
 @item reference_stream @var{specifier}
 Set the reference stream, as specified by the string @var{specifier}.
-If @var{specifier} is set to @code{auto}, the reference is choosen
+If @var{specifier} is set to @code{auto}, the reference is chosen
 automatically. Otherwise it must be a stream specifier (see the ``Stream
 specifiers'' chapter in the ffmpeg manual) which specifies the
 reference stream. The default value is @code{auto}.
@@ -829,7 +863,7 @@ In particular may be used in combination with the @file{ffmpeg} option
 @var{force_key_frames} may not be set accurately because of rounding
 issues, with the consequence that a key frame time may result set just
 before the specified time. For constant frame rate videos a value of
-1/2*@var{frame_rate} should address the worst case mismatch between
+1/(2*@var{frame_rate}) should address the worst case mismatch between
 the specified time and the time set by @var{force_key_frames}.
 
 @item segment_times @var{times}
@@ -962,7 +996,8 @@ specified by a stream specifier. If not specified, this defaults to
 all the input streams.
 @end table
 
-Some examples follow.
+@subsection Examples
+
 @itemize
 @item
 Encode something and both archive it in a WebM file and stream it

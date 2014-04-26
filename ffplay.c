@@ -359,8 +359,6 @@ int64_t get_valid_channel_layout(int64_t channel_layout, int channels)
         return 0;
 }
 
-static int packet_queue_put(PacketQueue *q, AVPacket *pkt);
-
 static int packet_queue_put_private(PacketQueue *q, AVPacket *pkt)
 {
     MyAVPacketList *pkt1;
@@ -1729,7 +1727,8 @@ static int get_video_frame(VideoState *is, AVFrame *frame, AVPacket *pkt, int *s
 static int configure_filtergraph(AVFilterGraph *graph, const char *filtergraph,
                                  AVFilterContext *source_ctx, AVFilterContext *sink_ctx)
 {
-    int ret;
+    int ret, i;
+    int nb_filters = graph->nb_filters;
     AVFilterInOut *outputs = NULL, *inputs = NULL;
 
     if (filtergraph) {
@@ -1756,6 +1755,10 @@ static int configure_filtergraph(AVFilterGraph *graph, const char *filtergraph,
         if ((ret = avfilter_link(source_ctx, 0, sink_ctx, 0)) < 0)
             goto fail;
     }
+
+    /* Reorder the filters to ensure that inputs of the custom filters are merged first */
+    for (i = 0; i < graph->nb_filters - nb_filters; i++)
+        FFSWAP(AVFilterContext*, graph->filters[i], graph->filters[i + nb_filters]);
 
     ret = avfilter_graph_config(graph, NULL);
 fail:
@@ -2749,6 +2752,8 @@ static int read_thread(void *arg)
     if (genpts)
         ic->flags |= AVFMT_FLAG_GENPTS;
 
+    av_format_inject_global_side_data(ic);
+
     opts = setup_find_stream_info_opts(ic, codec_opts);
     orig_nb_streams = ic->nb_streams;
 
@@ -2945,6 +2950,8 @@ static int read_thread(void *arg)
                 packet_queue_put_nullpacket(&is->videoq, is->video_stream);
             if (is->audio_stream >= 0)
                 packet_queue_put_nullpacket(&is->audioq, is->audio_stream);
+            if (is->subtitle_stream >= 0)
+                packet_queue_put_nullpacket(&is->subtitleq, is->subtitle_stream);
             SDL_Delay(10);
             eof=0;
             continue;
@@ -3115,6 +3122,11 @@ static void stream_cycle_channel(VideoState *is, int codec_type)
  the_end:
     if (p && stream_index != -1)
         stream_index = p->stream_index[stream_index];
+    av_log(NULL, AV_LOG_INFO, "Switch %s stream from #%d to #%d\n",
+           av_get_media_type_string(codec_type),
+           old_index,
+           stream_index);
+
     stream_component_close(is, old_index);
     stream_component_open(is, stream_index);
 }
@@ -3163,6 +3175,33 @@ static void refresh_loop_wait_event(VideoState *is, SDL_Event *event) {
             video_refresh(is, &remaining_time);
         SDL_PumpEvents();
     }
+}
+
+static void seek_chapter(VideoState *is, int incr)
+{
+    int64_t pos = get_master_clock(is) * AV_TIME_BASE;
+    int i;
+
+    if (!is->ic->nb_chapters)
+        return;
+
+    /* find the current chapter */
+    for (i = 0; i < is->ic->nb_chapters; i++) {
+        AVChapter *ch = is->ic->chapters[i];
+        if (av_compare_ts(pos, AV_TIME_BASE_Q, ch->start, ch->time_base) < 0) {
+            i--;
+            break;
+        }
+    }
+
+    i += incr;
+    i = FFMAX(i, 0);
+    if (i >= is->ic->nb_chapters)
+        return;
+
+    av_log(NULL, AV_LOG_VERBOSE, "Seeking to chapter %d.\n", i);
+    stream_seek(is, av_rescale_q(is->ic->chapters[i]->start, is->ic->chapters[i]->time_base,
+                                 AV_TIME_BASE_Q), 0, 0);
 }
 
 /* handle an event sent by the GUI */
@@ -3214,11 +3253,19 @@ static void event_loop(VideoState *cur_stream)
                 toggle_audio_display(cur_stream);
                 break;
             case SDLK_PAGEUP:
-                incr = 600.0;
-                goto do_seek;
+                if (cur_stream->ic->nb_chapters <= 1) {
+                    incr = 600.0;
+                    goto do_seek;
+                }
+                seek_chapter(cur_stream, 1);
+                break;
             case SDLK_PAGEDOWN:
-                incr = -600.0;
-                goto do_seek;
+                if (cur_stream->ic->nb_chapters <= 1) {
+                    incr = -600.0;
+                    goto do_seek;
+                }
+                seek_chapter(cur_stream, -1);
+                break;
             case SDLK_LEFT:
                 incr = -10.0;
                 goto do_seek;

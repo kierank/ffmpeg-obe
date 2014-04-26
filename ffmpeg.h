@@ -171,6 +171,8 @@ typedef struct OptionsContext {
     int        nb_intra_matrices;
     SpecifierOpt *inter_matrices;
     int        nb_inter_matrices;
+    SpecifierOpt *chroma_intra_matrices;
+    int        nb_chroma_intra_matrices;
     SpecifierOpt *top_field_first;
     int        nb_top_field_first;
     SpecifierOpt *metadata_map;
@@ -253,7 +255,6 @@ typedef struct InputStream {
     int64_t filter_in_rescale_delta_last;
 
     double ts_scale;
-    int is_start;            /* is 1 at the start and after a discontinuity */
     int saw_first_ts;
     int showed_multi_packet_warning;
     AVDictionary *opts;
@@ -305,6 +306,15 @@ typedef struct InputStream {
     int  (*hwaccel_retrieve_data)(AVCodecContext *s, AVFrame *frame);
     enum AVPixelFormat hwaccel_pix_fmt;
     enum AVPixelFormat hwaccel_retrieved_pix_fmt;
+
+    /* stats */
+    // combined size of all the packets read
+    uint64_t data_size;
+    /* number of packets successfully read for this stream */
+    uint64_t nb_packets;
+    // number of frames/samples retrieved from the decoder
+    uint64_t frames_decoded;
+    uint64_t samples_decoded;
 } InputStream;
 
 typedef struct InputFile {
@@ -325,6 +335,7 @@ typedef struct InputFile {
 
 #if HAVE_PTHREADS
     pthread_t thread;           /* thread reading from this file */
+    int non_blocking;           /* reading packets from the thread should not block */
     int finished;               /* the thread has exited */
     int joined;                 /* the thread has been joined */
     pthread_mutex_t fifo_lock;  /* lock for access to fifo */
@@ -343,6 +354,11 @@ enum forced_keyframes_const {
 };
 
 extern const char *const forced_keyframes_const_names[];
+
+typedef enum {
+    ENCODER_FINISHED = 1,
+    MUXER_FINISHED = 2,
+} OSTFinished ;
 
 typedef struct OutputStream {
     int file_index;          /* file index */
@@ -397,7 +413,7 @@ typedef struct OutputStream {
     AVDictionary *swr_opts;
     AVDictionary *resample_opts;
     char *apad;
-    int finished;        /* no more packets should be written for this stream */
+    OSTFinished finished;        /* no more packets should be written for this stream */
     int unavailable;                     /* true if the steram is unavailable (possibly temporarily) */
     int stream_copy;
     const char *attachment_filename;
@@ -407,6 +423,15 @@ typedef struct OutputStream {
     int keep_pix_fmt;
 
     AVCodecParserContext *parser;
+
+    /* stats */
+    // combined size of all the packets written
+    uint64_t data_size;
+    // number of packets send to the muxer
+    uint64_t packets_written;
+    // number of frames/samples sent to the encoder
+    uint64_t frames_encoded;
+    uint64_t samples_encoded;
 } OutputStream;
 
 typedef struct OutputFile {

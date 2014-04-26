@@ -259,7 +259,7 @@ enum ScanType {
 };
 
 typedef struct ShortTermRPS {
-    int num_negative_pics;
+    unsigned int num_negative_pics;
     int num_delta_pocs;
     int32_t delta_poc[32];
     uint8_t used[32];
@@ -380,7 +380,7 @@ typedef struct ScalingList {
 } ScalingList;
 
 typedef struct HEVCSPS {
-    int vps_id;
+    unsigned vps_id;
     int chroma_format_idc;
     uint8_t separate_colour_plane_flag;
 
@@ -461,7 +461,7 @@ typedef struct HEVCSPS {
 } HEVCSPS;
 
 typedef struct HEVCPPS {
-    int sps_id; ///< seq_parameter_set_id
+    unsigned int sps_id; ///< seq_parameter_set_id
 
     uint8_t sign_data_hiding_flag;
 
@@ -511,10 +511,10 @@ typedef struct HEVCPPS {
     uint8_t slice_header_extension_present_flag;
 
     // Inferred parameters
-    int *column_width;  ///< ColumnWidth
-    int *row_height;    ///< RowHeight
-    int *col_bd;        ///< ColBd
-    int *row_bd;        ///< RowBd
+    unsigned int *column_width;  ///< ColumnWidth
+    unsigned int *row_height;    ///< RowHeight
+    unsigned int *col_bd;        ///< ColBd
+    unsigned int *row_bd;        ///< RowBd
     int *col_idxX;
 
     int *ctb_addr_rs_to_ts; ///< CtbAddrRSToTS
@@ -526,7 +526,7 @@ typedef struct HEVCPPS {
 } HEVCPPS;
 
 typedef struct SliceHeader {
-    int pps_id;
+    unsigned int pps_id;
 
     ///< address (in raster order) of the first block in the current slice segment
     unsigned int   slice_segment_addr;
@@ -723,13 +723,14 @@ typedef struct HEVCLocalContext {
     int8_t qp_y;
     int8_t curr_qp_y;
 
+    int qPy_pred;
+
     TransformUnit tu;
 
     uint8_t ctb_left_flag;
     uint8_t ctb_up_flag;
     uint8_t ctb_up_right_flag;
     uint8_t ctb_up_left_flag;
-    int     start_of_tiles_x;
     int     end_of_tiles_x;
     int     end_of_tiles_y;
     /* +7 is for subpixel interpolation, *2 for high bit depths */
@@ -842,11 +843,13 @@ typedef struct HEVCContext {
     int **skipped_bytes_pos_nal;
     int *skipped_bytes_pos_size_nal;
 
-    uint8_t *data;
+    const uint8_t *data;
 
     HEVCNAL *nals;
     int nb_nals;
     int nals_allocated;
+    // type of the first VCL NAL of the current frame
+    enum NALUnitType first_nal_type;
 
     // for checking the frame checksums
     struct AVMD5 *md5_ctx;

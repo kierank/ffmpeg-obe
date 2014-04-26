@@ -336,8 +336,8 @@ static int alloc_sequence_buffers(DiracContext *s)
         w = FFALIGN(CALC_PADDING(w, MAX_DWT_LEVELS), 8); /* FIXME: Should this be 16 for SSE??? */
         h = top_padding + CALC_PADDING(h, MAX_DWT_LEVELS) + max_yblen/2;
 
-        s->plane[i].idwt_buf_base = av_mallocz((w+max_xblen)*h * sizeof(IDWTELEM));
-        s->plane[i].idwt_tmp      = av_malloc((w+16) * sizeof(IDWTELEM));
+        s->plane[i].idwt_buf_base = av_mallocz_array((w+max_xblen), h * sizeof(IDWTELEM));
+        s->plane[i].idwt_tmp      = av_malloc_array((w+16), sizeof(IDWTELEM));
         s->plane[i].idwt_buf      = s->plane[i].idwt_buf_base + top_padding*w;
         if (!s->plane[i].idwt_buf_base || !s->plane[i].idwt_tmp)
             return AVERROR(ENOMEM);
@@ -347,12 +347,12 @@ static int alloc_sequence_buffers(DiracContext *s)
     h = s->source.height;
 
     /* fixme: allocate using real stride here */
-    s->sbsplit  = av_malloc(sbwidth * sbheight);
-    s->blmotion = av_malloc(sbwidth * sbheight * 16 * sizeof(*s->blmotion));
-    s->edge_emu_buffer_base = av_malloc((w+64)*MAX_BLOCKSIZE);
+    s->sbsplit  = av_malloc_array(sbwidth, sbheight);
+    s->blmotion = av_malloc_array(sbwidth, sbheight * 16 * sizeof(*s->blmotion));
+    s->edge_emu_buffer_base = av_malloc_array((w+64), MAX_BLOCKSIZE);
 
-    s->mctmp     = av_malloc((w+64+MAX_BLOCKSIZE) * (h+MAX_BLOCKSIZE) * sizeof(*s->mctmp));
-    s->mcscratch = av_malloc((w+64)*MAX_BLOCKSIZE);
+    s->mctmp     = av_malloc_array((w+64+MAX_BLOCKSIZE), (h+MAX_BLOCKSIZE) * sizeof(*s->mctmp));
+    s->mcscratch = av_malloc_array((w+64), MAX_BLOCKSIZE);
 
     if (!s->sbsplit || !s->blmotion || !s->mctmp || !s->mcscratch)
         return AVERROR(ENOMEM);
@@ -397,11 +397,6 @@ static av_cold int dirac_decode_init(AVCodecContext *avctx)
 
     s->avctx = avctx;
     s->frame_number = -1;
-
-    if (avctx->flags&CODEC_FLAG_EMU_EDGE) {
-        av_log(avctx, AV_LOG_ERROR, "Edge emulation not supported!\n");
-        return AVERROR_PATCHWELCOME;
-    }
 
     ff_dsputil_init(&s->dsp, avctx);
     ff_diracdsp_init(&s->diracdsp);
@@ -759,7 +754,7 @@ static void decode_lowdelay(DiracContext *s)
     struct lowdelay_slice *slices;
     int slice_num = 0;
 
-    slices = av_mallocz(s->lowdelay.num_x * s->lowdelay.num_y * sizeof(struct lowdelay_slice));
+    slices = av_mallocz_array(s->lowdelay.num_x, s->lowdelay.num_y * sizeof(struct lowdelay_slice));
 
     align_get_bits(&s->gb);
     /*[DIRAC_STD] 13.5.2 Slices. slice(sx,sy) */
@@ -1360,8 +1355,8 @@ static int mc_subpel(DiracContext *s, DiracBlock *block, const uint8_t *src[5],
         motion_y >>= s->chroma_y_shift;
     }
 
-    mx         = motion_x & ~(-1 << s->mv_precision);
-    my         = motion_y & ~(-1 << s->mv_precision);
+    mx         = motion_x & ~(-1U << s->mv_precision);
+    my         = motion_y & ~(-1U << s->mv_precision);
     motion_x >>= s->mv_precision;
     motion_y >>= s->mv_precision;
     /* normalize subpel coordinates to epel */
@@ -1646,6 +1641,29 @@ static int dirac_decode_frame_internal(DiracContext *s)
     return 0;
 }
 
+static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
+{
+    int ret, i;
+    int chroma_x_shift, chroma_y_shift;
+    avcodec_get_chroma_sub_sample(avctx->pix_fmt, &chroma_x_shift, &chroma_y_shift);
+
+    f->width  = avctx->width  + 2 * EDGE_WIDTH;
+    f->height = avctx->height + 2 * EDGE_WIDTH + 2;
+    ret = ff_get_buffer(avctx, f, flags);
+    if (ret < 0)
+        return ret;
+
+    for (i = 0; f->data[i]; i++) {
+        int offset = (EDGE_WIDTH >> (i && i<3 ? chroma_y_shift : 0)) *
+                     f->linesize[i] + 32;
+        f->data[i] += offset;
+    }
+    f->width  = avctx->width;
+    f->height = avctx->height;
+
+    return 0;
+}
+
 /**
  * Dirac Specification ->
  * 11.1.1 Picture Header. picture_header()
@@ -1689,7 +1707,7 @@ static int dirac_decode_picture_header(DiracContext *s)
             for (j = 0; j < MAX_FRAMES; j++)
                 if (!s->all_frames[j].avframe->data[0]) {
                     s->ref_pics[i] = &s->all_frames[j];
-                    ff_get_buffer(s->avctx, s->ref_pics[i]->avframe, AV_GET_BUFFER_FLAG_REF);
+                    get_buffer_with_edge(s->avctx, s->ref_pics[i]->avframe, AV_GET_BUFFER_FLAG_REF);
                     break;
                 }
     }
@@ -1829,7 +1847,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         pic->avframe->key_frame = s->num_refs == 0;             /* [DIRAC_STD] is_intra()      */
         pic->avframe->pict_type = s->num_refs + 1;              /* Definition of AVPictureType in avutil.h */
 
-        if ((ret = ff_get_buffer(avctx, pic->avframe, (parse_code & 0x0C) == 0x0C ? AV_GET_BUFFER_FLAG_REF : 0)) < 0)
+        if ((ret = get_buffer_with_edge(avctx, pic->avframe, (parse_code & 0x0C) == 0x0C ? AV_GET_BUFFER_FLAG_REF : 0)) < 0)
             return ret;
         s->current_picture = pic;
         s->plane[0].stride = pic->avframe->linesize[0];

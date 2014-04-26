@@ -25,6 +25,8 @@
  * @author Nathan Caldwell
  */
 
+#include <inttypes.h>
+
 #include "avcodec.h"
 #include "get_bits.h"
 #include "mathops.h"
@@ -52,6 +54,7 @@ typedef struct LagarithContext {
     int zeros;                  /**< number of consecutive zero bytes encountered */
     int zeros_rem;              /**< number of zero bytes remaining to output */
     uint8_t *rgb_planes;
+    int      rgb_planes_allocated;
     int rgb_stride;
 } LagarithContext;
 
@@ -459,7 +462,7 @@ static int lag_decode_arith_plane(LagarithContext *l, uint8_t *dst,
 
         if (read > length)
             av_log(l->avctx, AV_LOG_WARNING,
-                   "Output more bytes than length (%d of %d)\n", read,
+                   "Output more bytes than length (%d of %"PRIu32")\n", read,
                    length);
     } else if (esc_count < 8) {
         esc_count -= 4;
@@ -611,13 +614,12 @@ static int lag_decode_frame(AVCodecContext *avctx,
         offs[1] = offset_gu;
         offs[2] = offset_ry;
 
+        l->rgb_stride = FFALIGN(avctx->width, 16);
+        av_fast_malloc(&l->rgb_planes, &l->rgb_planes_allocated,
+                       l->rgb_stride * avctx->height * planes + 1);
         if (!l->rgb_planes) {
-            l->rgb_stride = FFALIGN(avctx->width, 16);
-            l->rgb_planes = av_malloc(l->rgb_stride * avctx->height * 4 + 16);
-            if (!l->rgb_planes) {
-                av_log(avctx, AV_LOG_ERROR, "cannot allocate temporary buffer\n");
-                return AVERROR(ENOMEM);
-            }
+            av_log(avctx, AV_LOG_ERROR, "cannot allocate temporary buffer\n");
+            return AVERROR(ENOMEM);
         }
         for (i = 0; i < planes; i++)
             srcs[i] = l->rgb_planes + (i + 1) * l->rgb_stride * avctx->height - l->rgb_stride;
@@ -711,7 +713,7 @@ static int lag_decode_frame(AVCodecContext *avctx,
         break;
     default:
         av_log(avctx, AV_LOG_ERROR,
-               "Unsupported Lagarith frame type: %#x\n", frametype);
+               "Unsupported Lagarith frame type: %#"PRIx8"\n", frametype);
         return AVERROR_PATCHWELCOME;
     }
 

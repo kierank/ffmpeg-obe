@@ -37,6 +37,12 @@ typedef enum {
     AV_CLASS_CATEGORY_BITSTREAM_FILTER,
     AV_CLASS_CATEGORY_SWSCALER,
     AV_CLASS_CATEGORY_SWRESAMPLER,
+    AV_CLASS_CATEGORY_DEVICE_VIDEO_OUTPUT = 40,
+    AV_CLASS_CATEGORY_DEVICE_VIDEO_INPUT,
+    AV_CLASS_CATEGORY_DEVICE_AUDIO_OUTPUT,
+    AV_CLASS_CATEGORY_DEVICE_AUDIO_INPUT,
+    AV_CLASS_CATEGORY_DEVICE_OUTPUT,
+    AV_CLASS_CATEGORY_DEVICE_INPUT,
     AV_CLASS_CATEGORY_NB, ///< not part of ABI/API
 }AVClassCategory;
 
@@ -186,6 +192,16 @@ typedef struct AVClass {
  */
 
 /**
+ * Sets additional colors for extended debugging sessions.
+ * @code
+   av_log(ctx, AV_LOG_DEBUG|AV_LOG_C(134), "Message in purple\n");
+   @endcode
+ * Requires 256color terminal support. Uses outside debugging is not
+ * recommended.
+ */
+#define AV_LOG_C(x) (x << 8)
+
+/**
  * Send the specified message to the log if the level is less than or equal
  * to the current av_log_level. By default, all logging messages are sent to
  * stderr. This behavior can be altered by setting a different logging callback
@@ -260,9 +276,10 @@ void av_log_set_callback(void (*callback)(void*, int, const char*, va_list));
  *        lavu_log_constants "Logging Constant".
  * @param fmt The format string (printf-compatible) that specifies how
  *        subsequent arguments are converted to output.
- * @param ap The arguments referenced by the format string.
+ * @param vl The arguments referenced by the format string.
  */
-void av_log_default_callback(void* ptr, int level, const char* fmt, va_list vl);
+void av_log_default_callback(void *avcl, int level, const char *fmt,
+                             va_list vl);
 
 /**
  * Return the context name
@@ -305,6 +322,7 @@ void av_log_format_line(void *ptr, int level, const char *fmt, va_list vl,
  */
 #define AV_LOG_SKIP_REPEATED 1
 void av_log_set_flags(int arg);
+int av_log_get_flags(void);
 
 /**
  * @}

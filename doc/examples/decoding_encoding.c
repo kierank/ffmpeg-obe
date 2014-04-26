@@ -24,10 +24,10 @@
  * @file
  * libavcodec API use example.
  *
+ * @example decoding_encoding.c
  * Note that libavcodec only handles codecs (mpeg, mpeg4, etc...),
  * not file formats (avi, vob, mp4, mov, mkv, mxf, flv, mpegts, mpegps, etc...). See library 'libavformat' for the
  * format handling
- * @example doc/examples/decoding_encoding.c
  */
 
 #include <math.h>
@@ -307,6 +307,11 @@ static void audio_decode_example(const char *outfilename, const char *filename)
             int data_size = av_samples_get_buffer_size(NULL, c->channels,
                                                        decoded_frame->nb_samples,
                                                        c->sample_fmt, 1);
+            if (data_size < 0) {
+                /* This should not occur, checking just for paranoia */
+                fprintf(stderr, "Failed to calculate data size\n");
+                exit(1);
+            }
             fwrite(decoded_frame->data[0], 1, data_size, outfile);
         }
         avpkt.size -= len;
@@ -370,7 +375,13 @@ static void video_encode_example(const char *filename, int codec_id)
     c->height = 288;
     /* frames per second */
     c->time_base = (AVRational){1,25};
-    c->gop_size = 10; /* emit one intra frame every ten frames */
+    /* emit one intra frame every ten frames
+     * check frame pict_type before passing frame
+     * to encoder, if frame->pict_type is AV_PICTURE_TYPE_I
+     * then gop_size is ignored and the output of encoder
+     * will always be I frame irrespective to gop_size
+     */
+    c->gop_size = 10;
     c->max_b_frames = 1;
     c->pix_fmt = AV_PIX_FMT_YUV420P;
 

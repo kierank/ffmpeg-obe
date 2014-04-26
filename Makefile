@@ -4,6 +4,7 @@ include config.mak
 vpath %.c    $(SRC_PATH)
 vpath %.cpp  $(SRC_PATH)
 vpath %.h    $(SRC_PATH)
+vpath %.m    $(SRC_PATH)
 vpath %.S    $(SRC_PATH)
 vpath %.asm  $(SRC_PATH)
 vpath %.rc   $(SRC_PATH)
@@ -31,7 +32,7 @@ OBJS-ffmpeg                   += ffmpeg_opt.o ffmpeg_filter.o
 OBJS-ffmpeg-$(HAVE_VDPAU_X11) += ffmpeg_vdpau.o
 TESTTOOLS   = audiogen videogen rotozoom tiny_psnr tiny_ssim base64
 HOSTPROGS  := $(TESTTOOLS:%=tests/%) doc/print_options
-TOOLS       = qt-faststart trasher
+TOOLS       = qt-faststart trasher uncoded_frame
 TOOLS-$(CONFIG_ZLIB) += cws2fws
 
 FFLIBS-$(CONFIG_AVDEVICE) += avdevice
@@ -61,6 +62,8 @@ $(TOOLS): %$(EXESUF): %.o $(EXEOBJS)
 	$(LD) $(LDFLAGS) $(LD_O) $^ $(ELIBS)
 
 tools/cws2fws$(EXESUF): ELIBS = $(ZLIB)
+tools/uncoded_frame$(EXESUF): $(FF_DEP_LIBS)
+tools/uncoded_frame$(EXESUF): ELIBS = $(FF_EXTRALIBS)
 
 config.h: .config
 .config: $(wildcard $(FFLIBS:%=$(SRC_PATH)/lib%/all*.c))
@@ -70,9 +73,8 @@ config.h: .config
 
 SUBDIR_VARS := CLEANFILES EXAMPLES FFLIBS HOSTPROGS TESTPROGS TOOLS      \
                HEADERS ARCH_HEADERS BUILT_HEADERS SKIPHEADERS            \
-               ARMV5TE-OBJS ARMV6-OBJS VFP-OBJS NEON-OBJS                \
-               ALTIVEC-OBJS VIS-OBJS                                     \
-               MMX-OBJS YASM-OBJS                                        \
+               ARMV5TE-OBJS ARMV6-OBJS ARMV8-OBJS VFP-OBJS NEON-OBJS     \
+               ALTIVEC-OBJS MMX-OBJS YASM-OBJS                           \
                MIPSFPU-OBJS MIPSDSPR2-OBJS MIPSDSPR1-OBJS MIPS32R2-OBJS  \
                OBJS SLIBOBJS HOSTOBJS TESTOBJS
 

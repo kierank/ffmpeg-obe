@@ -604,7 +604,7 @@ static void rotate_luts(VC1Context *v)
         }                                                     \
     } while(0)
 
-    ROTATE(int *tmp,            &v->last_use_ic, &v->next_use_ic, v->curr_use_ic, &v->aux_use_ic);
+    ROTATE(int tmp,             &v->last_use_ic, &v->next_use_ic, v->curr_use_ic, &v->aux_use_ic);
     ROTATE(uint8_t tmp[2][256], v->last_luty,   v->next_luty,   v->curr_luty,   v->aux_luty);
     ROTATE(uint8_t tmp[2][256], v->last_lutuv,  v->next_lutuv,  v->curr_lutuv,  v->aux_lutuv);
 
@@ -613,10 +613,24 @@ static void rotate_luts(VC1Context *v)
     *v->curr_use_ic = 0;
 }
 
+static int read_bfraction(VC1Context *v, GetBitContext* gb) {
+    int bfraction_lut_index = get_vlc2(gb, ff_vc1_bfraction_vlc.table, VC1_BFRACTION_VLC_BITS, 1);
+
+    if (bfraction_lut_index == 21 || bfraction_lut_index < 0) {
+        av_log(v->s.avctx, AV_LOG_ERROR, "bfraction invalid\n");
+        return AVERROR_INVALIDDATA;
+    }
+    v->bfraction_lut_index = bfraction_lut_index;
+    v->bfraction           = ff_vc1_bfraction_lut[v->bfraction_lut_index];
+    return 0;
+}
+
 int ff_vc1_parse_frame_header(VC1Context *v, GetBitContext* gb)
 {
     int pqindex, lowquant, status;
 
+    v->field_mode = 0;
+    v->fcm = 0;
     if (v->finterpflag)
         v->interpfrm = get_bits1(gb);
     if (!v->s.avctx->codec)
@@ -644,8 +658,8 @@ int ff_vc1_parse_frame_header(VC1Context *v, GetBitContext* gb)
 
     v->bi_type = 0;
     if (v->s.pict_type == AV_PICTURE_TYPE_B) {
-        v->bfraction_lut_index = get_vlc2(gb, ff_vc1_bfraction_vlc.table, VC1_BFRACTION_VLC_BITS, 1);
-        v->bfraction           = ff_vc1_bfraction_lut[v->bfraction_lut_index];
+        if (read_bfraction(v, gb) < 0)
+            return AVERROR_INVALIDDATA;
         if (v->bfraction == 0) {
             v->s.pict_type = AV_PICTURE_TYPE_BI;
         }
@@ -837,7 +851,7 @@ int ff_vc1_parse_frame_header_adv(VC1Context *v, GetBitContext* gb)
     int mbmodetab, imvtab, icbptab, twomvbptab, fourmvbptab; /* useful only for debugging */
     int field_mode, fcm;
 
-    v->numref=0;
+    v->numref          = 0;
     v->p_frame_skipped = 0;
     if (v->second_field) {
         if(v->fcm!=2 || v->field_mode!=1)
@@ -845,7 +859,7 @@ int ff_vc1_parse_frame_header_adv(VC1Context *v, GetBitContext* gb)
         v->s.pict_type = (v->fptype & 1) ? AV_PICTURE_TYPE_P : AV_PICTURE_TYPE_I;
         if (v->fptype & 4)
             v->s.pict_type = (v->fptype & 1) ? AV_PICTURE_TYPE_BI : AV_PICTURE_TYPE_B;
-        v->s.current_picture_ptr->f.pict_type = v->s.pict_type;
+        v->s.current_picture_ptr->f->pict_type = v->s.pict_type;
         if (!v->pic_header_flag)
             goto parse_common_info;
     }
@@ -928,8 +942,8 @@ int ff_vc1_parse_frame_header_adv(VC1Context *v, GetBitContext* gb)
                 v->refdist += get_unary(gb, 0, 16);
         }
         if ((v->s.pict_type == AV_PICTURE_TYPE_B) || (v->s.pict_type == AV_PICTURE_TYPE_BI)) {
-            v->bfraction_lut_index = get_vlc2(gb, ff_vc1_bfraction_vlc.table, VC1_BFRACTION_VLC_BITS, 1);
-            v->bfraction           = ff_vc1_bfraction_lut[v->bfraction_lut_index];
+            if (read_bfraction(v, gb) < 0)
+                return AVERROR_INVALIDDATA;
             v->frfd = (v->bfraction * v->refdist) >> 8;
             v->brfd = v->refdist - v->frfd - 1;
             if (v->brfd < 0)
@@ -941,8 +955,8 @@ int ff_vc1_parse_frame_header_adv(VC1Context *v, GetBitContext* gb)
         if (v->finterpflag)
             v->interpfrm = get_bits1(gb);
         if (v->s.pict_type == AV_PICTURE_TYPE_B) {
-            v->bfraction_lut_index = get_vlc2(gb, ff_vc1_bfraction_vlc.table, VC1_BFRACTION_VLC_BITS, 1);
-            v->bfraction           = ff_vc1_bfraction_lut[v->bfraction_lut_index];
+            if (read_bfraction(v, gb) < 0)
+                return AVERROR_INVALIDDATA;
             if (v->bfraction == 0) {
                 v->s.pict_type = AV_PICTURE_TYPE_BI; /* XXX: should not happen here */
             }
@@ -1016,8 +1030,6 @@ int ff_vc1_parse_frame_header_adv(VC1Context *v, GetBitContext* gb)
                 v->reffield          = get_bits1(gb);
                 v->ref_field_type[0] = v->reffield ^ !v->cur_field_type;
             }
-        } else {
-            v->numref = 0;
         }
         if (v->extended_mv)
             v->mvrange = get_unary(gb, 0, 3);
@@ -1188,8 +1200,8 @@ int ff_vc1_parse_frame_header_adv(VC1Context *v, GetBitContext* gb)
         break;
     case AV_PICTURE_TYPE_B:
         if (v->fcm == ILACE_FRAME) {
-            v->bfraction_lut_index = get_vlc2(gb, ff_vc1_bfraction_vlc.table, VC1_BFRACTION_VLC_BITS, 1);
-            v->bfraction           = ff_vc1_bfraction_lut[v->bfraction_lut_index];
+            if (read_bfraction(v, gb) < 0)
+                return AVERROR_INVALIDDATA;
             if (v->bfraction == 0) {
                 return -1;
             }
@@ -1693,6 +1705,8 @@ av_cold int ff_vc1_init_common(VC1Context *v)
     /* Other defaults */
     v->pq      = -1;
     v->mvrange = 0; /* 7.1.1.18, p80 */
+
+    ff_vc1dsp_init(&v->vc1dsp);
 
     return 0;
 }

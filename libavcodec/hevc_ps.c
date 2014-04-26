@@ -92,7 +92,7 @@ int ff_hevc_decode_short_term_rps(HEVCContext *s, ShortTermRPS *rps,
         uint8_t delta_rps_sign;
 
         if (is_slice_header) {
-            int delta_idx = get_ue_golomb_long(gb) + 1;
+            unsigned int delta_idx = get_ue_golomb_long(gb) + 1;
             if (delta_idx > sps->nb_st_rps) {
                 av_log(s->avctx, AV_LOG_ERROR,
                        "Invalid value of delta_idx in slice header RPS: %d > %d.\n",
@@ -245,7 +245,7 @@ static void parse_ptl(HEVCContext *s, PTL *ptl, int max_num_sub_layers)
     }
 }
 
-static void decode_sublayer_hrd(HEVCContext *s, int nb_cpb,
+static void decode_sublayer_hrd(HEVCContext *s, unsigned int nb_cpb,
                                 int subpic_params_present)
 {
     GetBitContext *gb = &s->HEVClc->gb;
@@ -299,7 +299,7 @@ static void decode_hrd(HEVCContext *s, int common_inf_present,
 
     for (i = 0; i < max_sublayers; i++) {
         int low_delay = 0;
-        int nb_cpb = 1;
+        unsigned int nb_cpb = 1;
         int fixed_rate = get_bits1(gb);
 
         if (!fixed_rate)
@@ -501,8 +501,8 @@ static void decode_vui(HEVCContext *s, HEVCSPS *sps)
     vui->vui_timing_info_present_flag = get_bits1(gb);
 
     if (vui->vui_timing_info_present_flag) {
-        vui->vui_num_units_in_tick               = get_bits(gb, 32);
-        vui->vui_time_scale                      = get_bits(gb, 32);
+        vui->vui_num_units_in_tick               = get_bits_long(gb, 32);
+        vui->vui_time_scale                      = get_bits_long(gb, 32);
         vui->vui_poc_proportional_to_timing_flag = get_bits1(gb);
         if (vui->vui_poc_proportional_to_timing_flag)
             vui->vui_num_ticks_poc_diff_one_minus1 = get_ue_golomb_long(gb);
@@ -555,18 +555,18 @@ static int scaling_list_data(HEVCContext *s, ScalingList *sl)
     GetBitContext *gb = &s->HEVClc->gb;
     uint8_t scaling_list_pred_mode_flag[4][6];
     int32_t scaling_list_dc_coef[2][6];
-    int size_id, matrix_id, i, pos, delta;
+    int size_id, matrix_id, i, pos;
 
     for (size_id = 0; size_id < 4; size_id++)
         for (matrix_id = 0; matrix_id < (size_id == 3 ? 2 : 6); matrix_id++) {
             scaling_list_pred_mode_flag[size_id][matrix_id] = get_bits1(gb);
             if (!scaling_list_pred_mode_flag[size_id][matrix_id]) {
-                delta = get_ue_golomb_long(gb);
+                unsigned int delta = get_ue_golomb_long(gb);
                 /* Only need to handle non-zero delta. Zero means default,
                  * which should already be in the arrays. */
                 if (delta) {
                     // Copy from previous array.
-                    if (matrix_id - delta < 0) {
+                    if (matrix_id < delta) {
                         av_log(s->avctx, AV_LOG_ERROR,
                                "Invalid delta in scaling list data: %d.\n", delta);
                         return AVERROR_INVALIDDATA;
@@ -611,8 +611,8 @@ int ff_hevc_decode_nal_sps(HEVCContext *s)
 {
     const AVPixFmtDescriptor *desc;
     GetBitContext *gb = &s->HEVClc->gb;
-    int ret    = 0;
-    int sps_id = 0;
+    int ret = 0;
+    unsigned int sps_id = 0;
     int log2_diff_max_min_transform_block_size;
     int bit_depth_chroma, start, vui_present, sublayer_ordering_info;
     int i;
@@ -636,7 +636,8 @@ int ff_hevc_decode_nal_sps(HEVCContext *s)
     }
 
     if (!s->vps_list[sps->vps_id]) {
-        av_log(s->avctx, AV_LOG_ERROR, "VPS does not exist \n");
+        av_log(s->avctx, AV_LOG_ERROR, "VPS %d does not exist\n",
+               sps->vps_id);
         ret = AVERROR_INVALIDDATA;
         goto err;
     }
@@ -763,8 +764,11 @@ int ff_hevc_decode_nal_sps(HEVCContext *s)
         if (sps->temporal_layer[i].num_reorder_pics > sps->temporal_layer[i].max_dec_pic_buffering - 1) {
             av_log(s->avctx, AV_LOG_ERROR, "sps_max_num_reorder_pics out of range: %d\n",
                    sps->temporal_layer[i].num_reorder_pics);
-            ret = AVERROR_INVALIDDATA;
-            goto err;
+            if (sps->temporal_layer[i].num_reorder_pics > MAX_DPB_SIZE - 1) {
+                ret = AVERROR_INVALIDDATA;
+                goto err;
+            }
+            sps->temporal_layer[i].max_dec_pic_buffering = sps->temporal_layer[i].num_reorder_pics + 1;
         }
     }
 
@@ -989,8 +993,8 @@ int ff_hevc_decode_nal_pps(HEVCContext *s)
     int pic_area_in_ctbs, pic_area_in_min_cbs, pic_area_in_min_tbs;
     int log2_diff_ctb_min_tb_size;
     int i, j, x, y, ctb_addr_rs, tile_id;
-    int ret    = 0;
-    int pps_id = 0;
+    int ret = 0;
+    unsigned int pps_id = 0;
 
     AVBufferRef *pps_buf;
     HEVCPPS *pps = av_mallocz(sizeof(*pps));
@@ -1030,7 +1034,7 @@ int ff_hevc_decode_nal_pps(HEVCContext *s)
         goto err;
     }
     if (!s->sps_list[pps->sps_id]) {
-        av_log(s->avctx, AV_LOG_ERROR, "SPS does not exist \n");
+        av_log(s->avctx, AV_LOG_ERROR, "SPS %u does not exist.\n", pps->sps_id);
         ret = AVERROR_INVALIDDATA;
         goto err;
     }
@@ -1107,7 +1111,7 @@ int ff_hevc_decode_nal_pps(HEVCContext *s)
 
         pps->uniform_spacing_flag = get_bits1(gb);
         if (!pps->uniform_spacing_flag) {
-            int sum = 0;
+            uint64_t sum = 0;
             for (i = 0; i < pps->num_tile_columns - 1; i++) {
                 pps->column_width[i] = get_ue_golomb_long(gb) + 1;
                 sum                 += pps->column_width[i];

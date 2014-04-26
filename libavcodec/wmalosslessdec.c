@@ -22,6 +22,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <inttypes.h>
+
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
 
@@ -127,8 +129,8 @@ typedef struct WmallDecodeCtx {
 
     int8_t  mclms_order;
     int8_t  mclms_scaling;
-    int16_t mclms_coeffs[128];
-    int16_t mclms_coeffs_cur[4];
+    int16_t mclms_coeffs[WMALL_MAX_CHANNELS * WMALL_MAX_CHANNELS * 32];
+    int16_t mclms_coeffs_cur[WMALL_MAX_CHANNELS * WMALL_MAX_CHANNELS];
     int16_t mclms_prevvalues[WMALL_MAX_CHANNELS * 2 * 32];
     int16_t mclms_updates[WMALL_MAX_CHANNELS * 2 * 32];
     int     mclms_recent;
@@ -197,7 +199,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
             avpriv_report_missing_feature(avctx, "Bit-depth higher than 16");
             return AVERROR_PATCHWELCOME;
         } else {
-            av_log(avctx, AV_LOG_ERROR, "Unknown bit-depth: %d\n",
+            av_log(avctx, AV_LOG_ERROR, "Unknown bit-depth: %"PRIu8"\n",
                    s->bits_per_sample);
             return AVERROR_INVALIDDATA;
         }
@@ -239,7 +241,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     s->bV3RTM                    = s->decode_flags & 0x100;
 
     if (s->max_num_subframes > MAX_SUBFRAMES) {
-        av_log(avctx, AV_LOG_ERROR, "invalid number of subframes %i\n",
+        av_log(avctx, AV_LOG_ERROR, "invalid number of subframes %"PRIu8"\n",
                s->max_num_subframes);
         return AVERROR_INVALIDDATA;
     }
@@ -257,7 +259,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     }
 
     if (s->num_channels < 0) {
-        av_log(avctx, AV_LOG_ERROR, "invalid number of channels %d\n",
+        av_log(avctx, AV_LOG_ERROR, "invalid number of channels %"PRId8"\n",
                s->num_channels);
         return AVERROR_INVALIDDATA;
     } else if (s->num_channels > WMALL_MAX_CHANNELS) {
@@ -382,7 +384,7 @@ static int decode_tilehdr(WmallDecodeCtx *s)
                 ++chan->num_subframes;
                 if (num_samples[c] > s->samples_per_frame) {
                     av_log(s->avctx, AV_LOG_ERROR, "broken frame: "
-                           "channel len(%d) > samples_per_frame(%d)\n",
+                           "channel len(%"PRIu16") > samples_per_frame(%"PRIu16")\n",
                            num_samples[c], s->samples_per_frame);
                     return AVERROR_INVALIDDATA;
                 }
@@ -652,10 +654,10 @@ static void mclms_update(WmallDecodeCtx *s, int icoef, int *pred)
     if (s->mclms_recent == 0) {
         memcpy(&s->mclms_prevvalues[order * num_channels],
                s->mclms_prevvalues,
-               2 * order * num_channels);
+               sizeof(int16_t) * order * num_channels);
         memcpy(&s->mclms_updates[order * num_channels],
                s->mclms_updates,
-               2 * order * num_channels);
+               sizeof(int16_t) * order * num_channels);
         s->mclms_recent = num_channels * order;
     }
 }
@@ -1094,7 +1096,8 @@ static int decode_frame(WmallDecodeCtx *s)
         if (len != (get_bits_count(gb) - s->frame_offset) + 2) {
             /* FIXME: not sure if this is always an error */
             av_log(s->avctx, AV_LOG_ERROR,
-                   "frame[%i] would have to skip %i bits\n", s->frame_num,
+                   "frame[%"PRIu32"] would have to skip %i bits\n",
+                   s->frame_num,
                    len - (get_bits_count(gb) - s->frame_offset) - 1);
             s->packet_loss = 1;
             return 0;
@@ -1213,7 +1216,8 @@ static int decode_packet(AVCodecContext *avctx, void *data, int *got_frame_ptr,
         if (!s->packet_loss &&
             ((s->packet_sequence_number + 1) & 0xF) != packet_sequence_number) {
             s->packet_loss = 1;
-            av_log(avctx, AV_LOG_ERROR, "Packet loss detected! seq %x vs %x\n",
+            av_log(avctx, AV_LOG_ERROR,
+                   "Packet loss detected! seq %"PRIx8" vs %x\n",
                    s->packet_sequence_number, packet_sequence_number);
         }
         s->packet_sequence_number = packet_sequence_number;

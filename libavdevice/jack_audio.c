@@ -163,7 +163,7 @@ static int start_jack(AVFormatContext *context)
     sem_init(&self->packet_count, 0, 0);
 
     self->sample_rate = jack_get_sample_rate(self->client);
-    self->ports       = av_malloc(self->nports * sizeof(*self->ports));
+    self->ports       = av_malloc_array(self->nports, sizeof(*self->ports));
     self->buffer_size = jack_get_buffer_size(self->client);
 
     /* Register JACK ports */
@@ -333,6 +333,7 @@ static const AVClass jack_indev_class = {
     .item_name      = av_default_item_name,
     .option         = options,
     .version        = LIBAVUTIL_VERSION_INT,
+    .category       = AV_CLASS_CATEGORY_DEVICE_AUDIO_INPUT,
 };
 
 AVInputFormat ff_jack_demuxer = {

@@ -30,6 +30,9 @@ ffplay:
 ffprobe:
   ffprobe.c                             Stefano Sabatini
 
+ffserver:
+  ffserver.c                            Reynaldo H. Verdejo Pinochet
+
 Commandline utility code:
   cmdutils.c, cmdutils.h                Michael Niedermayer
 
@@ -70,6 +73,7 @@ Other:
   bprint                                Nicolas George
   bswap.h
   des                                   Reimar Doeffinger
+  dynarray.h                            Nicolas George
   eval.c, eval.h                        Michael Niedermayer
   float_dsp                             Loren Merritt
   hash                                  Reimar Doeffinger
@@ -148,6 +152,7 @@ Codecs:
   cdxl.c                                Paul B Mahol
   celp_filters.*                        Vitor Sessak
   cinepak.c                             Roberto Togni
+  cinepakenc.c                          Rl / Aetey G.T. AB
   cljr                                  Alex Beregszaszi
   cllc.c                                Derek Buitenhuis
   cook.c, cookdata.h                    Benjamin Larsson
@@ -163,6 +168,7 @@ Codecs:
   exif.c, exif.h                        Thilo Borgmann
   ffv1.c                                Michael Niedermayer
   ffwavesynth.c                         Nicolas George
+  fic.c                                 Derek Buitenhuis
   flac*                                 Justin Ruggles
   flashsv*                              Benjamin Larsson
   flicvideo.c                           Mike Melanson
@@ -197,6 +203,7 @@ Codecs:
   libvorbis.c                           David Conrad
   libvpx*                               James Zern
   libx264.c                             Mans Rullgard, Jason Garrett-Glaser
+  libx265.c                             Derek Buitenhuis
   libxavs.c                             Stefan Gehrer
   libzvbi-teletextdec.c                 Marton Balint
   loco.c                                Kostya Shishkov
@@ -297,12 +304,16 @@ libavdevice
     libavdevice/avdevice.h
 
 
-  dshow.c                               Roger Pack
+  avfoundation.m                        Thilo Borgmann
+  dshow.c                               Roger Pack (CC rogerdpack@gmail.com)
   fbdev_enc.c                           Lukasz Marek
+  gdigrab.c                             Roger Pack (CC rogerdpack@gmail.com)
   iec61883.c                            Georg Lippitsch
   lavfi                                 Stefano Sabatini
   libdc1394.c                           Roman Shaposhnik
+  opengl_enc.c                          Lukasz Marek
   pulse_audio_enc.c                     Lukasz Marek
+  qtkit.m                               Thilo Borgmann
   sdl                                   Stefano Sabatini
   v4l2.c                                Luca Abeni
   vfwcap.c                              Ramiro Polla
@@ -330,6 +341,7 @@ Filters:
   avf_avectorscope.c                    Paul B Mahol
   vf_blend.c                            Paul B Mahol
   vf_colorbalance.c                     Paul B Mahol
+  vf_dejudder.c                         Nicholas Robbins
   vf_delogo.c                           Jean Delvare (CC <khali@linux-fr.org>)
   vf_drawbox.c/drawgrid                 Andrey Utkin
   vf_extractplanes.c                    Paul B Mahol
@@ -413,7 +425,8 @@ Muxers/Demuxers:
   mpc.c                                 Kostya Shishkov
   mpeg.c                                Michael Niedermayer
   mpegenc.c                             Michael Niedermayer
-  mpegts*                               Baptiste Coudurier
+  mpegts.c                              Marton Balint
+  mpegtsenc.c                           Baptiste Coudurier
   msnwc_tcp.c                           Ramiro Polla
   mtv.c                                 Reynaldo H. Verdejo Pinochet
   mxf*                                  Baptiste Coudurier
@@ -504,6 +517,7 @@ x86                                     Michael Niedermayer
 Releases
 ========
 
+2.2                                     Michael Niedermayer
 2.1                                     Michael Niedermayer
 1.2                                     Michael Niedermayer
 

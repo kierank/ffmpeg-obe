@@ -317,6 +317,7 @@ static int submit_packet(PerThreadContext *p, AVPacket *avpkt)
     FrameThreadContext *fctx = p->parent;
     PerThreadContext *prev_thread = fctx->prev_thread;
     const AVCodec *codec = p->avctx->codec;
+    int ret;
 
     if (!avpkt->size && !(codec->capabilities & CODEC_CAP_DELAY)) return 0;
 
@@ -340,6 +341,7 @@ static int submit_packet(PerThreadContext *p, AVPacket *avpkt)
         }
     }
 
+    av_packet_free_side_data(&p->avpkt);
     av_buffer_unref(&p->avpkt.buf);
     p->avpkt = *avpkt;
     if (avpkt->buf)
@@ -353,6 +355,10 @@ static int submit_packet(PerThreadContext *p, AVPacket *avpkt)
         p->avpkt.data = p->buf;
         memcpy(p->buf, avpkt->data, avpkt->size);
         memset(p->buf + avpkt->size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
+    }
+    if ((ret = av_copy_packet_side_data(&p->avpkt, avpkt)) < 0) {
+        pthread_mutex_unlock(&p->mutex);
+        return ret;
     }
 
     p->state = STATE_SETTING_UP;
@@ -592,6 +598,7 @@ void ff_frame_thread_free(AVCodecContext *avctx, int thread_count)
         pthread_cond_destroy(&p->input_cond);
         pthread_cond_destroy(&p->progress_cond);
         pthread_cond_destroy(&p->output_cond);
+        av_packet_free_side_data(&p->avpkt);
         av_buffer_unref(&p->avpkt.buf);
         av_freep(&p->buf);
         av_freep(&p->released_buffers);
@@ -727,8 +734,6 @@ void ff_thread_flush(AVCodecContext *avctx)
     if (fctx->prev_thread) {
         if (fctx->prev_thread != &fctx->threads[0])
             update_context_from_thread(fctx->threads[0].avctx, fctx->prev_thread->avctx, 0);
-        if (avctx->codec->flush)
-            avctx->codec->flush(fctx->threads[0].avctx);
     }
 
     fctx->next_decoding = fctx->next_finished = 0;
@@ -741,6 +746,9 @@ void ff_thread_flush(AVCodecContext *avctx)
         av_frame_unref(p->frame);
 
         release_delayed_buffers(p);
+
+        if (avctx->codec->flush)
+            avctx->codec->flush(p->avctx);
     }
 }
 
@@ -867,7 +875,7 @@ FF_DISABLE_DEPRECATION_WARNINGS
                            avctx->get_buffer2 == avcodec_default_get_buffer2);
 FF_ENABLE_DEPRECATION_WARNINGS
 
-    if (!f->f->buf[0])
+    if (!f->f || !f->f->buf[0])
         return;
 
     if (avctx->debug & FF_DEBUG_BUFFERS)

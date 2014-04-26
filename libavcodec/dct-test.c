@@ -107,6 +107,9 @@ static void ff_prores_idct_wrap(int16_t *dst){
         qmat[i]=4;
     }
     ff_prores_idct(dst, qmat);
+    for(i=0; i<64; i++) {
+         dst[i] -= 512;
+    }
 }
 #if ARCH_X86_64 && HAVE_MMX && HAVE_YASM
 void ff_prores_idct_put_10_sse2(uint16_t *dst, int linesize,
@@ -164,7 +167,7 @@ static const struct algo idct_tab[] = {
 #if HAVE_ARMV6
     { "SIMPLE-ARMV6",   ff_simple_idct_armv6,  MMX_PERM,  AV_CPU_FLAG_ARMV6   },
 #endif
-#if HAVE_NEON
+#if HAVE_NEON && ARCH_ARM
     { "SIMPLE-NEON",    ff_simple_idct_neon, PARTTRANS_PERM, AV_CPU_FLAG_NEON },
 #endif
 
