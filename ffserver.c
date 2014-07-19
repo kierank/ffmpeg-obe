@@ -56,7 +56,9 @@
 #include "libavutil/time.h"
 
 #include <stdarg.h>
+#if HAVE_UNISTD_H
 #include <unistd.h>
+#endif
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #if HAVE_POLL_H
@@ -556,7 +558,8 @@ static int socket_open_listen(struct sockaddr_in *my_addr)
     }
 
     tmp = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &tmp, sizeof(tmp));
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &tmp, sizeof(tmp)))
+        av_log(NULL, AV_LOG_WARNING, "setsockopt SO_REUSEADDR failed\n");
 
     my_addr->sin_family = AF_INET;
     if (bind (server_fd, (struct sockaddr *) my_addr, sizeof (*my_addr)) < 0) {
@@ -572,7 +575,9 @@ static int socket_open_listen(struct sockaddr_in *my_addr)
         closesocket(server_fd);
         return -1;
     }
-    ff_socket_nonblock(server_fd, 1);
+
+    if (ff_socket_nonblock(server_fd, 1) < 0)
+        av_log(NULL, AV_LOG_WARNING, "ff_socket_nonblock failed\n");
 
     return server_fd;
 }
@@ -641,7 +646,7 @@ static int http_server(void)
     struct pollfd *poll_table, *poll_entry;
     HTTPContext *c, *c_next;
 
-    if(!(poll_table = av_mallocz((nb_max_http_connections + 2)*sizeof(*poll_table)))) {
+    if(!(poll_table = av_mallocz_array(nb_max_http_connections + 2, sizeof(*poll_table)))) {
         http_log("Impossible to allocate a poll table handling %d connections.\n", nb_max_http_connections);
         return -1;
     }
@@ -744,8 +749,10 @@ static int http_server(void)
         do {
             ret = poll(poll_table, poll_entry - poll_table, delay);
             if (ret < 0 && ff_neterrno() != AVERROR(EAGAIN) &&
-                ff_neterrno() != AVERROR(EINTR))
+                ff_neterrno() != AVERROR(EINTR)) {
+                av_free(poll_table);
                 return -1;
+            }
         } while (ret < 0);
 
         cur_time = av_gettime() / 1000;
@@ -808,7 +815,8 @@ static void http_send_too_busy_reply(int fd)
                        "</body></html>\r\n",
                        nb_connections, nb_max_connections);
     av_assert0(len < sizeof(buffer));
-    send(fd, buffer, len, 0);
+    if (send(fd, buffer, len, 0) < len)
+        av_log(NULL, AV_LOG_WARNING, "Could not send too-busy reply, send() failed\n");
 }
 
 
@@ -826,7 +834,8 @@ static void new_connection(int server_fd, int is_rtsp)
         http_log("error during accept %s\n", strerror(errno));
         return;
     }
-    ff_socket_nonblock(fd, 1);
+    if (ff_socket_nonblock(fd, 1) < 0)
+        av_log(NULL, AV_LOG_WARNING, "ff_socket_nonblock failed\n");
 
     if (nb_connections >= nb_max_connections) {
         http_send_too_busy_reply(fd);
@@ -1754,7 +1763,10 @@ static int http_parse_request(HTTPContext *c)
                             q += strlen(q);
 
                             len = sizeof(my_addr);
-                            getsockname(c->fd, (struct sockaddr *)&my_addr, &len);
+
+                            /* XXX: Should probably fail? */
+                            if (getsockname(c->fd, (struct sockaddr *)&my_addr, &len))
+                                http_log("getsockname() failed\n");
 
                             /* XXX: should use a dynamic buffer */
                             sdp_data_size = prepare_sdp_description(stream,
@@ -2285,7 +2297,7 @@ static int http_prepare_data(HTTPContext *c)
         c->fmt_ctx = *ctx;
         av_freep(&ctx);
         av_dict_copy(&(c->fmt_ctx.metadata), c->stream->metadata, 0);
-        c->fmt_ctx.streams = av_mallocz(sizeof(AVStream *) * c->stream->nb_streams);
+        c->fmt_ctx.streams = av_mallocz_array(c->stream->nb_streams, sizeof(AVStream *));
 
         for(i=0;i<c->stream->nb_streams;i++) {
             AVStream *src;
@@ -2747,8 +2759,11 @@ static int http_receive_data(HTTPContext *c)
         /* a packet has been received : write it in the store, except
            if header */
         if (c->data_count > FFM_PACKET_SIZE) {
-            /* XXX: use llseek or url_seek */
-            lseek(c->feed_fd, feed->feed_write_index, SEEK_SET);
+            /* XXX: use llseek or url_seek
+             * XXX: Should probably fail? */
+            if (lseek(c->feed_fd, feed->feed_write_index, SEEK_SET) == -1)
+                http_log("Seek to %"PRId64" failed\n", feed->feed_write_index);
+
             if (write(c->feed_fd, c->buffer, FFM_PACKET_SIZE) < 0) {
                 http_log("Error writing to feed file: %s\n", strerror(errno));
                 goto fail;
@@ -3410,7 +3425,7 @@ static int rtp_new_av_stream(HTTPContext *c,
     if (!st)
         goto fail;
     ctx->nb_streams = 1;
-    ctx->streams = av_mallocz(sizeof(AVStream *) * ctx->nb_streams);
+    ctx->streams = av_mallocz_array(ctx->nb_streams, sizeof(AVStream *));
     if (!ctx->streams)
       goto fail;
     ctx->streams[0] = st;

@@ -50,9 +50,9 @@ static int parse_str_int(const uint8_t *p, int len, const uint8_t *key)
         return INT_MIN;
 
     for(; p<end; p++) {
-        char **eptr;
+        char *eptr;
         int64_t ret = strtol(p, &eptr, 10);
-        if (eptr != p)
+        if ((const uint8_t *)eptr != p)
             return ret;
     }
     return INT_MIN;
@@ -82,10 +82,10 @@ static int xbm_decode_frame(AVCodecContext *avctx, void *data,
         return ret;
 
     // goto start of image data
-    next = ptr + strcspn(ptr, "{");
-    if (!*next)
-        next = ptr + strcspn(ptr, "(");
-    if (!*next)
+    next = memchr(ptr, '{', avpkt->size);
+    if (!next)
+        next = memchr(ptr, '(', avpkt->size);
+    if (!next)
         return AVERROR_INVALIDDATA;
     ptr = next + 1;
 
@@ -95,7 +95,10 @@ static int xbm_decode_frame(AVCodecContext *avctx, void *data,
         for (j = 0; j < linesize; j++) {
             uint8_t val;
 
-            ptr += strcspn(ptr, "x$") + 1;
+            while (ptr < end && *ptr != 'x' && *ptr != '$')
+                ptr++;
+
+            ptr ++;
             if (ptr < end && av_isxdigit(*ptr)) {
                 val = convert(*ptr++);
                 if (av_isxdigit(*ptr))

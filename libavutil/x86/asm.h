@@ -25,6 +25,7 @@
 #include "config.h"
 
 typedef struct xmm_reg { uint64_t a, b; } xmm_reg;
+typedef struct ymm_reg { uint64_t a, b, c, d; } ymm_reg;
 
 #if ARCH_X86_64
 #    define OPSIZE "q"
@@ -111,6 +112,8 @@ typedef int x86_reg;
 #   define MANGLE(a) EXTERN_PREFIX LOCAL_MANGLE(a)
 #   define NAMED_CONSTRAINTS_ADD(...)
 #   define NAMED_CONSTRAINTS(...)
+#   define NAMED_CONSTRAINTS_ARRAY_ADD(...)
+#   define NAMED_CONSTRAINTS_ARRAY(...)
 #else
     /* When direct symbol references are used in code passed to a compiler that does not support them
      *  then these references need to be converted to named asm constraints instead.
@@ -141,6 +144,10 @@ typedef int x86_reg;
 #   define NAMED_CONSTRAINTS_ADD(...) , FOR_EACH_VA(NAME_CONSTRAINT,__VA_ARGS__)
     // Same but without comma for when there are no previously defined constraints
 #   define NAMED_CONSTRAINTS(...) FOR_EACH_VA(NAME_CONSTRAINT,__VA_ARGS__)
+    // Same as above NAMED_CONSTRAINTS except used for passing arrays/pointers instead of normal variables
+#   define NAME_CONSTRAINT_ARRAY(x) [x] "m"(*x)
+#   define NAMED_CONSTRAINTS_ARRAY_ADD(...) , FOR_EACH_VA(NAME_CONSTRAINT_ARRAY,__VA_ARGS__)
+#   define NAMED_CONSTRAINTS_ARRAY(...) FOR_EACH_VA(NAME_CONSTRAINT_ARRAY,__VA_ARGS__)
 #endif
 
 #endif /* AVUTIL_X86_ASM_H */

@@ -686,6 +686,9 @@ static int is_intra_more_likely(ERContext *s)
     if (!s->last_pic.f || !s->last_pic.f->data[0])
         return 1; // no previous frame available -> use spatial prediction
 
+    if (s->avctx->error_concealment & FF_EC_FAVOR_INTER)
+        return 0;
+
     undamaged_count = 0;
     for (i = 0; i < s->mb_num; i++) {
         const int mb_xy = s->mb_index2xy[i];
@@ -736,12 +739,12 @@ static int is_intra_more_likely(ERContext *s)
                 } else {
                     ff_thread_await_progress(s->last_pic.tf, mb_y, 0);
                 }
-                is_intra_likely += s->dsp->sad[0](NULL, last_mb_ptr, mb_ptr,
-                                                 linesize[0], 16);
+                is_intra_likely += s->mecc->sad[0](NULL, last_mb_ptr, mb_ptr,
+                                                   linesize[0], 16);
                 // FIXME need await_progress() here
-                is_intra_likely -= s->dsp->sad[0](NULL, last_mb_ptr,
-                                                 last_mb_ptr + linesize[0] * 16,
-                                                 linesize[0], 16);
+                is_intra_likely -= s->mecc->sad[0](NULL, last_mb_ptr,
+                                                   last_mb_ptr + linesize[0] * 16,
+                                                   linesize[0], 16);
             } else {
                 if (IS_INTRA(s->cur_pic.mb_type[mb_xy]))
                    is_intra_likely++;

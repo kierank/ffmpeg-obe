@@ -1,12 +1,12 @@
 include $(SUBDIR)../config.mak
 
 NAME = swscale
-FFLIBS = avutil
 
 HEADERS = swscale.h                                                     \
           version.h                                                     \
 
-OBJS = input.o                                          \
+OBJS = hscale_fast_bilinear.o                           \
+       input.o                                          \
        options.o                                        \
        output.o                                         \
        rgb2rgb.o                                        \

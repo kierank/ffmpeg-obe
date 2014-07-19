@@ -41,7 +41,7 @@
 #include "libavutil/mem.h"
 #include "libavutil/x86/asm.h"
 #include "idct_xvid.h"
-#include "dsputil_x86.h"
+#include "idctdsp.h"
 
 #if HAVE_SSE2_INLINE
 
@@ -381,7 +381,7 @@ av_extern_inline void ff_idct_xvid_sse2(short *block)
     iLLM_PASS("%0")
     "6:                                                          \n\t"
     : "+r"(block)
-    : NAMED_CONSTRAINTS(m127,iTab1,walkenIdctRounders,iTab2,iTab3,iTab4,tan3,tan1,tan2,sqrt2)
+    : NAMED_CONSTRAINTS_ARRAY(m127,iTab1,walkenIdctRounders,iTab2,iTab3,iTab4,tan3,tan1,tan2,sqrt2)
     : XMM_CLOBBERS("%xmm0" , "%xmm1" , "%xmm2" , "%xmm3" ,
                    "%xmm4" , "%xmm5" , "%xmm6" , "%xmm7" ,)
 #if ARCH_X86_64

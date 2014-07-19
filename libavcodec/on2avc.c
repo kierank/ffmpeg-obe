@@ -24,7 +24,6 @@
 #include "libavutil/float_dsp.h"
 #include "avcodec.h"
 #include "bytestream.h"
-#include "dsputil.h"
 #include "fft.h"
 #include "get_bits.h"
 #include "golomb.h"
@@ -173,7 +172,7 @@ static int on2avc_decode_band_scales(On2AVCContext *c, GetBitContext *gb)
             } else {
                 scale += get_vlc2(gb, c->scale_diff.table, 9, 3) - 60;
             }
-            if (scale < 0 || scale > 128) {
+            if (scale < 0 || scale > 127) {
                 av_log(c->avctx, AV_LOG_ERROR, "Invalid scale value %d\n",
                        scale);
                 return AVERROR_INVALIDDATA;
@@ -314,7 +313,7 @@ static void zero_head_and_tail(float *src, int len, int order0, int order1)
 }
 
 static void pretwiddle(float *src, float *dst, int dst_len, int tab_step,
-                       int step, int order0, int order1, const double **tabs)
+                       int step, int order0, int order1, const double * const *tabs)
 {
     float *src2, *out;
     const double *tab;
@@ -342,7 +341,7 @@ static void pretwiddle(float *src, float *dst, int dst_len, int tab_step,
 
 static void twiddle(float *src1, float *src2, int src2_len,
                     const double *tab, int tab_len, int step,
-                    int order0, int order1, const double **tabs)
+                    int order0, int order1, const double * const *tabs)
 {
     int steps;
     int mask;

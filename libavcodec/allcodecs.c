@@ -79,6 +79,7 @@ void avcodec_register_all(void)
     REGISTER_HWACCEL(H264_DXVA2,        h264_dxva2);
     REGISTER_HWACCEL(H264_VAAPI,        h264_vaapi);
     REGISTER_HWACCEL(H264_VDA,          h264_vda);
+    REGISTER_HWACCEL(H264_VDA_OLD,      h264_vda_old);
     REGISTER_HWACCEL(H264_VDPAU,        h264_vdpau);
     REGISTER_HWACCEL(MPEG1_XVMC,        mpeg1_xvmc);
     REGISTER_HWACCEL(MPEG1_VDPAU,       mpeg1_vdpau);
@@ -371,6 +372,7 @@ void avcodec_register_all(void)
     REGISTER_DECODER(MPC8,              mpc8);
     REGISTER_ENCDEC (NELLYMOSER,        nellymoser);
     REGISTER_DECODER(ON2AVC,            on2avc);
+    REGISTER_DECODER(OPUS,              opus);
     REGISTER_DECODER(PAF_AUDIO,         paf_audio);
     REGISTER_DECODER(QCELP,             qcelp);
     REGISTER_DECODER(QDM2,              qdm2);
@@ -493,7 +495,7 @@ void avcodec_register_all(void)
     REGISTER_DECODER(SUBVIEWER1,        subviewer1);
     REGISTER_DECODER(TEXT,              text);
     REGISTER_DECODER(VPLAYER,           vplayer);
-    REGISTER_DECODER(WEBVTT,            webvtt);
+    REGISTER_ENCDEC (WEBVTT,            webvtt);
     REGISTER_ENCDEC (XSUB,              xsub);
 
     /* external libraries */
@@ -561,6 +563,7 @@ void avcodec_register_all(void)
     REGISTER_PARSER(MPEG4VIDEO,         mpeg4video);
     REGISTER_PARSER(MPEGAUDIO,          mpegaudio);
     REGISTER_PARSER(MPEGVIDEO,          mpegvideo);
+    REGISTER_PARSER(OPUS,               opus);
     REGISTER_PARSER(PNG,                png);
     REGISTER_PARSER(PNM,                pnm);
     REGISTER_PARSER(RV30,               rv30);

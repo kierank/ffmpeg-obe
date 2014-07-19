@@ -438,7 +438,7 @@ static int calculate_bitrate(AVFormatContext *s)
         maxpos = FFMAX(maxpos, st->index_entries[j-1].pos);
         lensum += len;
     }
-    if (maxpos < avi->io_fsize*9/10) // index doesnt cover the whole file
+    if (maxpos < avi->io_fsize*9/10) // index does not cover the whole file
         return 0;
     if (lensum*9/10 > maxpos || lensum < maxpos*9/10) // frame sum and filesize mismatch
         return 0;
@@ -671,6 +671,7 @@ static int avi_read_header(AVFormatContext *s)
                 codec_type = AVMEDIA_TYPE_VIDEO;
 
                 ast->sample_size = 0;
+                st->avg_frame_rate = av_inv_q(st->time_base);
                 break;
             case MKTAG('a', 'u', 'd', 's'):
                 codec_type = AVMEDIA_TYPE_AUDIO;
@@ -1160,7 +1161,7 @@ start_sync:
             ast = st->priv_data;
 
             if (!ast) {
-                av_log(s, AV_LOG_WARNING, "Skiping foreign stream %d packet\n", n);
+                av_log(s, AV_LOG_WARNING, "Skipping foreign stream %d packet\n", n);
                 continue;
             }
 
@@ -1779,8 +1780,7 @@ static int avi_read_seek(AVFormatContext *s, int stream_index,
             continue;
 
 //        av_assert1(st2->codec->block_align);
-        av_assert0((int64_t)st2->time_base.num * ast2->rate ==
-                   (int64_t)st2->time_base.den * ast2->scale);
+        av_assert0(fabs(av_q2d(st2->time_base) - ast2->scale / (double)ast2->rate) < av_q2d(st2->time_base) * 0.00000001);
         index = av_index_search_timestamp(st2,
                                           av_rescale_q(timestamp,
                                                        st->time_base,

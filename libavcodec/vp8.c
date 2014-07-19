@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2010 David Conrad
  * Copyright (C) 2010 Ronald S. Bultje
- * Copyright (C) 2010 Jason Garrett-Glaser
+ * Copyright (C) 2010 Fiona Glaser
  * Copyright (C) 2012 Daniel Kang
  * Copyright (C) 2014 Peter Ross
  *
@@ -1153,7 +1153,7 @@ void decode_mb_mode(VP8Context *s, VP8Macroblock *mb, int mb_x, int mb_y,
         *segment = 0;
         for (i = 0; i < 4; i++) {
             if (s->feature_enabled[i]) {
-                if (vp56_rac_get_prob(c, s->feature_present_prob[i])) {
+                if (vp56_rac_get_prob_branchy(c, s->feature_present_prob[i])) {
                       int index = vp8_rac_get_tree(c, vp7_feature_index_tree,
                                                    s->feature_index_prob[i]);
                       av_log(s->avctx, AV_LOG_WARNING,
@@ -2584,7 +2584,8 @@ int vp78_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
     s->next_framep[VP56_FRAME_CURRENT] = curframe;
 
-    ff_thread_finish_setup(avctx);
+    if (avctx->codec->update_thread_context)
+        ff_thread_finish_setup(avctx);
 
     s->linesize   = curframe->tf.f->linesize[0];
     s->uvlinesize = curframe->tf.f->linesize[1];
@@ -2755,7 +2756,7 @@ static av_cold int vp8_decode_init_thread_copy(AVCodecContext *avctx)
     return 0;
 }
 
-#define REBASE(pic) pic ? pic - &s_src->frames[0] + &s->frames[0] : NULL
+#define REBASE(pic) ((pic) ? (pic) - &s_src->frames[0] + &s->frames[0] : NULL)
 
 static int vp8_decode_update_thread_context(AVCodecContext *dst,
                                             const AVCodecContext *src)

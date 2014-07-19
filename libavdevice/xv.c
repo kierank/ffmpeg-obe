@@ -58,6 +58,7 @@ typedef struct {
     int image_width, image_height;
     XShmSegmentInfo yuv_shminfo;
     int xv_port;
+    Atom wm_delete_message;
 } XVContext;
 
 typedef struct XVTagFormatMap
@@ -145,19 +146,20 @@ static int xv_write_header(AVFormatContext *s)
         }
     }
     if (!xv->window_id) {
-    //TODO: reident
-    xv->window = XCreateSimpleWindow(xv->display, DefaultRootWindow(xv->display),
-                                     xv->window_x, xv->window_y,
-                                     xv->window_width, xv->window_height,
-                                     0, 0, 0);
-    if (!xv->window_title) {
-        if (!(xv->window_title = av_strdup(s->filename))) {
-            ret = AVERROR(ENOMEM);
-            goto fail;
+        xv->window = XCreateSimpleWindow(xv->display, DefaultRootWindow(xv->display),
+                                         xv->window_x, xv->window_y,
+                                         xv->window_width, xv->window_height,
+                                         0, 0, 0);
+        if (!xv->window_title) {
+            if (!(xv->window_title = av_strdup(s->filename))) {
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
         }
-    }
-    XStoreName(xv->display, xv->window, xv->window_title);
-    XMapWindow(xv->display, xv->window);
+        XStoreName(xv->display, xv->window, xv->window_title);
+        xv->wm_delete_message = XInternAtom(xv->display, "WM_DELETE_WINDOW", False);
+        XSetWMProtocols(xv->display, xv->window, &xv->wm_delete_message, 1);
+        XMapWindow(xv->display, xv->window);
     } else
         xv->window = xv->window_id;
 
@@ -298,6 +300,19 @@ static int write_picture(AVFormatContext *s, AVPicture *pict)
         img->data + img->offsets[1],
         img->data + img->offsets[2]
     };
+
+    /* Check messages. Window might get closed. */
+    if (!xv->window_id) {
+        XEvent event;
+        while (XPending(xv->display)) {
+            XNextEvent(xv->display, &event);
+            if (event.type == ClientMessage && event.xclient.data.l[0] == xv->wm_delete_message) {
+                av_log(xv, AV_LOG_DEBUG, "Window close event.\n");
+                return AVERROR(EPIPE);
+            }
+        }
+    }
+
     av_image_copy(data, img->pitches, (const uint8_t **)pict->data, pict->linesize,
                   xv->image_format, img->width, img->height);
     return xv_repaint(s);

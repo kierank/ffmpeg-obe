@@ -1585,7 +1585,7 @@ void ff_get_unscaled_swscale(SwsContext *c)
         c->swscale = ff_yuv2rgb_get_func_ptr(c);
     }
 
-    if (srcFormat == AV_PIX_FMT_YUV410P &&
+    if (srcFormat == AV_PIX_FMT_YUV410P && !(dstH & 3) &&
         (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P) &&
         !(flags & SWS_BITEXACT)) {
         c->swscale = yvu9ToYv12Wrapper;
@@ -1749,8 +1749,6 @@ void ff_get_unscaled_swscale(SwsContext *c)
             c->swscale = planarCopyWrapper;
     }
 
-    if (ARCH_BFIN)
-        ff_get_unscaled_swscale_bfin(c);
     if (ARCH_PPC)
         ff_get_unscaled_swscale_ppc(c);
 //     if (ARCH_ARM)

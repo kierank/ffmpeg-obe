@@ -707,7 +707,7 @@ static av_cold int flac_parse_init(AVCodecParserContext *c)
     fpc->pc = c;
     /* There will generally be FLAC_MIN_HEADERS buffered in the fifo before
        it drains.  This is allocated early to avoid slow reallocation. */
-    fpc->fifo_buf = av_fifo_alloc(FLAC_AVG_FRAME_SIZE * (FLAC_MIN_HEADERS + 3));
+    fpc->fifo_buf = av_fifo_alloc_array(FLAC_MIN_HEADERS + 3, FLAC_AVG_FRAME_SIZE);
     if (!fpc->fifo_buf)
         return AVERROR(ENOMEM);
     return 0;
@@ -724,7 +724,7 @@ static void flac_parse_close(AVCodecParserContext *c)
         av_free(curr);
         curr = temp;
     }
-    av_fifo_free(fpc->fifo_buf);
+    av_fifo_freep(&fpc->fifo_buf);
     av_free(fpc->wrap_buf);
 }
 

@@ -20,7 +20,7 @@
  */
 
 #include "libavutil/intreadwrite.h"
-#include "libavutil/intfloat_readwrite.h"
+#include "libavutil/intfloat.h"
 #include "libavutil/imgutils.h"
 #include "bytestream.h"
 #include "avcodec.h"
@@ -151,7 +151,7 @@ static int decode_frame(AVCodecContext *avctx,
         buf = avpkt->data + 1724;
         i = read32(&buf, endian);
         if(i) {
-            AVRational q = av_d2q(av_int2flt(i), 4096);
+            AVRational q = av_d2q(av_int2float(i), 4096);
             if (q.num > 0 && q.den > 0)
                 avctx->time_base = av_inv_q(q);
         }
@@ -254,6 +254,8 @@ static int decode_frame(AVCodecContext *avctx,
         av_log(avctx, AV_LOG_ERROR, "Unsupported format\n");
         return AVERROR_PATCHWELCOME;
     }
+
+    ff_set_sar(avctx, avctx->sample_aspect_ratio);
 
     if ((ret = ff_get_buffer(avctx, p, 0)) < 0)
         return ret;
