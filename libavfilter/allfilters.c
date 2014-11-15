@@ -45,9 +45,6 @@ void avfilter_register_all(void)
         return;
     initialized = 1;
 
-#if FF_API_ACONVERT_FILTER
-    REGISTER_FILTER(ACONVERT,       aconvert,       af);
-#endif
     REGISTER_FILTER(ADELAY,         adelay,         af);
     REGISTER_FILTER(AECHO,          aecho,          af);
     REGISTER_FILTER(AEVAL,          aeval,          af);
@@ -96,6 +93,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(REPLAYGAIN,     replaygain,     af);
     REGISTER_FILTER(RESAMPLE,       resample,       af);
     REGISTER_FILTER(SILENCEDETECT,  silencedetect,  af);
+    REGISTER_FILTER(SILENCEREMOVE,  silenceremove,  af);
     REGISTER_FILTER(TREBLE,         treble,         af);
     REGISTER_FILTER(VOLUME,         volume,         af);
     REGISTER_FILTER(VOLUMEDETECT,   volumedetect,   af);
@@ -115,6 +113,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(BLACKFRAME,     blackframe,     vf);
     REGISTER_FILTER(BLEND,          blend,          vf);
     REGISTER_FILTER(BOXBLUR,        boxblur,        vf);
+    REGISTER_FILTER(CODECVIEW,      codecview,      vf);
     REGISTER_FILTER(COLORBALANCE,   colorbalance,   vf);
     REGISTER_FILTER(COLORCHANNELMIXER, colorchannelmixer, vf);
     REGISTER_FILTER(COLORMATRIX,    colormatrix,    vf);
@@ -156,6 +155,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(INTERLACE,      interlace,      vf);
     REGISTER_FILTER(INTERLEAVE,     interleave,     vf);
     REGISTER_FILTER(KERNDEINT,      kerndeint,      vf);
+    REGISTER_FILTER(LENSCORRECTION, lenscorrection, vf);
     REGISTER_FILTER(LUT3D,          lut3d,          vf);
     REGISTER_FILTER(LUT,            lut,            vf);
     REGISTER_FILTER(LUTRGB,         lutrgb,         vf);
@@ -213,6 +213,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(VIDSTABTRANSFORM, vidstabtransform, vf);
     REGISTER_FILTER(VIGNETTE,       vignette,       vf);
     REGISTER_FILTER(W3FDIF,         w3fdif,         vf);
+    REGISTER_FILTER(XBR,            xbr,            vf);
     REGISTER_FILTER(YADIF,          yadif,          vf);
     REGISTER_FILTER(ZMQ,            zmq,            vf);
     REGISTER_FILTER(ZOOMPAN,        zoompan,        vf);

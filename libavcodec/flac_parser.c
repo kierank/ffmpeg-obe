@@ -667,7 +667,6 @@ static int flac_parse(AVCodecParserContext *s, AVCodecContext *avctx,
         }
     }
 
-    curr = fpc->headers;
     for (curr = fpc->headers; curr; curr = curr->next) {
         if (curr->max_score > 0 &&
             (!fpc->best_header || curr->max_score > fpc->best_header->max_score)) {
@@ -725,7 +724,7 @@ static void flac_parse_close(AVCodecParserContext *c)
         curr = temp;
     }
     av_fifo_freep(&fpc->fifo_buf);
-    av_free(fpc->wrap_buf);
+    av_freep(&fpc->wrap_buf);
 }
 
 AVCodecParser ff_flac_parser = {

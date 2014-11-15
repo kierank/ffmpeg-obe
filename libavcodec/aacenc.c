@@ -567,6 +567,10 @@ static int aac_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
                 ics->group_len[w] = wi[ch].grouping[w];
 
             apply_window_and_mdct(s, &cpe->ch[ch], overlap);
+            if (isnan(cpe->ch->coeffs[0])) {
+                av_log(avctx, AV_LOG_ERROR, "Input contains NaN\n");
+                return AVERROR(EINVAL);
+            }
         }
         start_ch += chans;
     }
@@ -705,8 +709,8 @@ static av_cold int dsp_init(AVCodecContext *avctx, AACEncContext *s)
 static av_cold int alloc_buffers(AVCodecContext *avctx, AACEncContext *s)
 {
     int ch;
-    FF_ALLOCZ_OR_GOTO(avctx, s->buffer.samples, 3 * 1024 * s->channels * sizeof(s->buffer.samples[0]), alloc_fail);
-    FF_ALLOCZ_OR_GOTO(avctx, s->cpe, sizeof(ChannelElement) * s->chan_map[0], alloc_fail);
+    FF_ALLOCZ_ARRAY_OR_GOTO(avctx, s->buffer.samples, s->channels, 3 * 1024 * sizeof(s->buffer.samples[0]), alloc_fail);
+    FF_ALLOCZ_ARRAY_OR_GOTO(avctx, s->cpe, s->chan_map[0], sizeof(ChannelElement), alloc_fail);
     FF_ALLOCZ_OR_GOTO(avctx, avctx->extradata, 5 + FF_INPUT_BUFFER_PADDING_SIZE, alloc_fail);
 
     for(ch = 0; ch < s->channels; ch++)
@@ -776,7 +780,7 @@ static av_cold int aac_encode_init(AVCodecContext *avctx)
     for (i = 0; i < 428; i++)
         ff_aac_pow34sf_tab[i] = sqrt(ff_aac_pow2sf_tab[i] * sqrt(ff_aac_pow2sf_tab[i]));
 
-    avctx->delay = 1024;
+    avctx->initial_padding = 1024;
     ff_af_queue_init(avctx, &s->afq);
 
     return 0;

@@ -193,9 +193,9 @@ static void free_segment_list(struct playlist *pls)
 {
     int i;
     for (i = 0; i < pls->n_segments; i++) {
-        av_free(pls->segments[i]->key);
-        av_free(pls->segments[i]->url);
-        av_free(pls->segments[i]);
+        av_freep(&pls->segments[i]->key);
+        av_freep(&pls->segments[i]->url);
+        av_freep(&pls->segments[i]);
     }
     av_freep(&pls->segments);
     pls->n_segments = 0;
@@ -212,7 +212,7 @@ static void free_playlist_list(HLSContext *c)
         av_dict_free(&pls->id3_initial);
         ff_id3v2_free_extra_meta(&pls->id3_deferred_extra);
         av_free_packet(&pls->pkt);
-        av_free(pls->pb.buffer);
+        av_freep(&pls->pb.buffer);
         if (pls->input)
             ffurl_close(pls->input);
         if (pls->ctx) {
@@ -243,7 +243,7 @@ static void free_rendition_list(HLSContext *c)
 {
     int i;
     for (i = 0; i < c->n_renditions; i++)
-        av_free(c->renditions[i]);
+        av_freep(&c->renditions[i]);
     av_freep(&c->renditions);
     c->n_renditions = 0;
 }
@@ -541,7 +541,7 @@ static int parse_playlist(HLSContext *c, const char *url,
         pls->finished = 0;
         pls->type = PLS_TYPE_UNSPECIFIED;
     }
-    while (!url_feof(in)) {
+    while (!avio_feof(in)) {
         read_chomp_line(in, line, sizeof(line));
         if (av_strstart(line, "#EXT-X-STREAM-INF:", &ptr)) {
             is_variant = 1;
@@ -666,7 +666,7 @@ static int parse_playlist(HLSContext *c, const char *url,
         }
     }
     if (pls)
-        pls->last_load_time = av_gettime();
+        pls->last_load_time = av_gettime_relative();
 
 fail:
     av_free(new_url);
@@ -919,14 +919,8 @@ static int open_input(HLSContext *c, struct playlist *pls)
     if (seg->size >= 0) {
         /* try to restrict the HTTP request to the part we want
          * (if this is in fact a HTTP request) */
-        char offset[24] = { 0 };
-        char end_offset[24] = { 0 };
-        snprintf(offset, sizeof(offset) - 1, "%"PRId64,
-                 seg->url_offset);
-        snprintf(end_offset, sizeof(end_offset) - 1, "%"PRId64,
-                 seg->url_offset + seg->size);
-        av_dict_set(&opts, "offset", offset, 0);
-        av_dict_set(&opts, "end_offset", end_offset, 0);
+        av_dict_set_int(&opts, "offset", seg->url_offset, 0);
+        av_dict_set_int(&opts, "end_offset", seg->url_offset + seg->size, 0);
     }
 
     av_log(pls->parent, AV_LOG_VERBOSE, "HLS request for url '%s', offset %"PRId64", playlist %d\n",
@@ -1041,7 +1035,7 @@ restart:
 
 reload:
         if (!v->finished &&
-            av_gettime() - v->last_load_time >= reload_interval) {
+            av_gettime_relative() - v->last_load_time >= reload_interval) {
             if ((ret = parse_playlist(c, v->url, v, NULL)) < 0) {
                 av_log(v->parent, AV_LOG_WARNING, "Failed to reload playlist %d\n",
                        v->index);
@@ -1061,7 +1055,7 @@ reload:
         if (v->cur_seq_no >= v->start_seq_no + v->n_segments) {
             if (v->finished)
                 return AVERROR_EOF;
-            while (av_gettime() - v->last_load_time < reload_interval) {
+            while (av_gettime_relative() - v->last_load_time < reload_interval) {
                 if (ff_check_interrupt(c->interrupt_callback))
                     return AVERROR_EXIT;
                 av_usleep(100*1000);
@@ -1204,7 +1198,7 @@ static int select_cur_seq_no(HLSContext *c, struct playlist *pls)
     int seq_no;
 
     if (!pls->finished && !c->first_packet &&
-        av_gettime() - pls->last_load_time >= default_reload_interval(pls))
+        av_gettime_relative() - pls->last_load_time >= default_reload_interval(pls))
         /* reload the playlist since it was suspended */
         parse_playlist(c, pls->url, pls, NULL);
 
@@ -1350,6 +1344,10 @@ static int hls_read_header(AVFormatContext *s)
         }
         pls->ctx->pb       = &pls->pb;
         pls->stream_offset = stream_offset;
+
+        if ((ret = ff_copy_whitelists(pls->ctx, s)) < 0)
+            goto fail;
+
         ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, NULL);
         if (ret < 0)
             goto fail;
@@ -1397,15 +1395,12 @@ static int hls_read_header(AVFormatContext *s)
     /* Create a program for each variant */
     for (i = 0; i < c->n_variants; i++) {
         struct variant *v = c->variants[i];
-        char bitrate_str[20];
         AVProgram *program;
-
-        snprintf(bitrate_str, sizeof(bitrate_str), "%d", v->bandwidth);
 
         program = av_new_program(s, i);
         if (!program)
             goto fail;
-        av_dict_set(&program->metadata, "variant_bitrate", bitrate_str, 0);
+        av_dict_set_int(&program->metadata, "variant_bitrate", v->bandwidth, 0);
 
         for (j = 0; j < v->n_playlists; j++) {
             struct playlist *pls = v->playlists[j];
@@ -1419,7 +1414,7 @@ static int hls_read_header(AVFormatContext *s)
 
                 /* Set variant_bitrate for streams unique to this variant */
                 if (!is_shared && v->bandwidth)
-                    av_dict_set(&st->metadata, "variant_bitrate", bitrate_str, 0);
+                    av_dict_set_int(&st->metadata, "variant_bitrate", v->bandwidth, 0);
             }
         }
     }
@@ -1532,7 +1527,7 @@ static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
                 AVRational tb;
                 ret = av_read_frame(pls->ctx, &pls->pkt);
                 if (ret < 0) {
-                    if (!url_feof(&pls->pb) && ret != AVERROR_EOF)
+                    if (!avio_feof(&pls->pb) && ret != AVERROR_EOF)
                         return ret;
                     reset_packet(&pls->pkt);
                     break;

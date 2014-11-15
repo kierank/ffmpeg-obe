@@ -126,7 +126,7 @@ static int parse_playlist(URLContext *h, const char *url)
 
     free_segment_list(s);
     s->finished = 0;
-    while (!url_feof(in)) {
+    while (!avio_feof(in)) {
         read_chomp_line(in, line, sizeof(line));
         if (av_strstart(line, "#EXT-X-STREAM-INF:", &ptr)) {
             struct variant_info info = {{0}};
@@ -169,7 +169,7 @@ static int parse_playlist(URLContext *h, const char *url)
             }
         }
     }
-    s->last_load_time = av_gettime();
+    s->last_load_time = av_gettime_relative();
 
 fail:
     avio_close(in);
@@ -273,7 +273,7 @@ start:
                       s->target_duration;
 retry:
     if (!s->finished) {
-        int64_t now = av_gettime();
+        int64_t now = av_gettime_relative();
         if (now - s->last_load_time >= reload_interval) {
             if ((ret = parse_playlist(h, s->playlisturl)) < 0)
                 return ret;
@@ -292,7 +292,7 @@ retry:
     if (s->cur_seq_no - s->start_seq_no >= s->n_segments) {
         if (s->finished)
             return AVERROR_EOF;
-        while (av_gettime() - s->last_load_time < reload_interval) {
+        while (av_gettime_relative() - s->last_load_time < reload_interval) {
             if (ff_check_interrupt(&h->interrupt_callback))
                 return AVERROR_EXIT;
             av_usleep(100*1000);

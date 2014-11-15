@@ -3,7 +3,7 @@ representing a number as input, which may be followed by one of the SI
 unit prefixes, for example: 'K', 'M', or 'G'.
 
 If 'i' is appended to the SI unit prefix, the complete prefix will be
-interpreted as a unit prefix for binary multiplies, which are based on
+interpreted as a unit prefix for binary multiples, which are based on
 powers of 1024 instead of powers of 1000. Appending 'B' to the SI unit
 prefix multiplies the value by 8. This allows using, for example:
 'KB', 'MiB', 'G' and 'B' as number suffixes.
@@ -46,6 +46,13 @@ in the program with the id @var{program_id}. Otherwise, it matches all streams i
 program.
 @item #@var{stream_id} or i:@var{stream_id}
 Match the stream by stream id (e.g. PID in MPEG-TS container).
+@item m:@var{key}[:@var{value}]
+Matches streams with the metadata tag @var{key} having the specified value. If
+@var{value} is not given, matches streams that contain the given tag with any
+value.
+
+Note that in @command{ffmpeg}, matching by metadata will only work properly for
+input files.
 @end table
 
 @section Generic options
@@ -96,7 +103,10 @@ Print detailed information about the filter name @var{filter_name}. Use the
 Show version.
 
 @item -formats
-Show available formats.
+Show available formats (including devices).
+
+@item -devices
+Show available devices.
 
 @item -codecs
 Show all codecs known to libavcodec.
@@ -130,6 +140,22 @@ Show channel names and standard channel layouts.
 
 @item -colors
 Show recognized color names.
+
+@item -sources @var{device}[,@var{opt1}=@var{val1}[,@var{opt2}=@var{val2}]...]
+Show autodetected sources of the intput device.
+Some devices may provide system-dependent source names that cannot be autodetected.
+The returned list cannot be assumed to be always complete.
+@example
+ffmpeg -sources pulse,server=192.168.0.4
+@end example
+
+@item -sinks @var{device}[,@var{opt1}=@var{val1}[,@var{opt2}=@var{val2}]...]
+Show autodetected sinks of the output device.
+Some devices may provide system-dependent sink names that cannot be autodetected.
+The returned list cannot be assumed to be always complete.
+@example
+ffmpeg -sinks pulse,server=192.168.0.4
+@end example
 
 @item -loglevel [repeat+]@var{loglevel} | -v [repeat+]@var{loglevel}
 Set the logging level used by the library.

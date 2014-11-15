@@ -301,7 +301,7 @@ rdt_parse_packet (AVFormatContext *ctx, PayloadContext *rdt, AVStream *st,
     if (rdt->audio_pkt_cnt == 0) {
         int pos;
 
-        ffio_init_context(&pb, buf, len, 0, NULL, NULL, NULL, NULL);
+        ffio_init_context(&pb, (uint8_t *)buf, len, 0, NULL, NULL, NULL, NULL);
         flags = (flags & RTP_FLAG_KEY) ? 2 : 0;
         res = ff_rm_parse_packet (rdt->rmctx, &pb, st, rdt->rmst[st->index], len, pkt,
                                   &seq, flags, *timestamp);
@@ -523,16 +523,25 @@ static PayloadContext *
 rdt_new_context (void)
 {
     PayloadContext *rdt = av_mallocz(sizeof(PayloadContext));
-    int ret;
     if (!rdt)
         return NULL;
-    ret = avformat_open_input(&rdt->rmctx, "", &ff_rdt_demuxer, NULL);
-    if (ret < 0) {
-        av_free(rdt);
-        return NULL;
-    }
+
+    rdt->rmctx = avformat_alloc_context();
+    if (!rdt->rmctx)
+        av_freep(&rdt);
 
     return rdt;
+}
+
+static int
+rdt_init_context (AVFormatContext *s, int st_index, PayloadContext *rdt)
+{
+    int ret;
+
+    if ((ret = ff_copy_whitelists(rdt->rmctx, s)) < 0)
+        return ret;
+
+    return avformat_open_input(&rdt->rmctx, "", &ff_rdt_demuxer, NULL);
 }
 
 static void
@@ -559,6 +568,7 @@ static RTPDynamicProtocolHandler rdt_ ## n ## _handler = { \
     .codec_id         = AV_CODEC_ID_NONE, \
     .parse_sdp_a_line = rdt_parse_sdp_line, \
     .alloc            = rdt_new_context, \
+    .init             = rdt_init_context, \
     .free             = rdt_free_context, \
     .parse_packet     = rdt_parse_packet \
 }

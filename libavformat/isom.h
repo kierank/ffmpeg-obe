@@ -78,6 +78,7 @@ typedef struct MOVFragment {
     unsigned duration;
     unsigned size;
     unsigned flags;
+    int64_t time;
 } MOVFragment;
 
 typedef struct MOVTrackExt {
@@ -92,6 +93,18 @@ typedef struct MOVSbgp {
     unsigned int count;
     unsigned int index;
 } MOVSbgp;
+
+typedef struct MOVFragmentIndexItem {
+    int64_t moof_offset;
+    int64_t time;
+} MOVFragmentIndexItem;
+
+typedef struct MOVFragmentIndex {
+    unsigned track_id;
+    unsigned item_count;
+    unsigned current_item;
+    MOVFragmentIndexItem *items;
+} MOVFragmentIndex;
 
 typedef struct MOVStreamContext {
     AVIOContext *pb;
@@ -171,6 +184,10 @@ typedef struct MOVContext {
     int *bitrates;          ///< bitrates read before streams creation
     int bitrates_count;
     int moov_retry;
+    int use_mfra_for;
+    int has_looked_for_mfra;
+    MOVFragmentIndex** fragment_index_data;
+    unsigned fragment_index_count;
 } MOVContext;
 
 int ff_mp4_read_descr_len(AVIOContext *pb);
@@ -231,10 +248,14 @@ void ff_mp4_parse_es_descr(AVIOContext *pb, int *es_id);
      (tag) == MKTAG('A', 'V', 'i', 'n'))
 
 
-int ff_mov_read_esds(AVFormatContext *fc, AVIOContext *pb, MOVAtom atom);
+int ff_mov_read_esds(AVFormatContext *fc, AVIOContext *pb);
 enum AVCodecID ff_mov_get_lpcm_codec_id(int bps, int flags);
 
 int ff_mov_read_stsd_entries(MOVContext *c, AVIOContext *pb, int entries);
 void ff_mov_write_chan(AVIOContext *pb, int64_t channel_layout);
+
+#define FF_MOV_FLAG_MFRA_AUTO -1
+#define FF_MOV_FLAG_MFRA_DTS 1
+#define FF_MOV_FLAG_MFRA_PTS 2
 
 #endif /* AVFORMAT_ISOM_H */

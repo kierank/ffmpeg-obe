@@ -243,7 +243,10 @@ typedef struct InputStream {
     AVStream *st;
     int discard;             /* true if stream data should be discarded */
     int user_set_discard;
-    int decoding_needed;     /* true if the packets must be decoded in 'raw_fifo' */
+    int decoding_needed;     /* non zero if the packets must be decoded in 'raw_fifo', see DECODING_FOR_* */
+#define DECODING_FOR_OST    1
+#define DECODING_FOR_FILTER 2
+
     AVCodecContext *dec_ctx;
     AVCodec *dec;
     AVFrame *decoded_frame;
@@ -402,7 +405,7 @@ typedef struct OutputStream {
     double forced_keyframes_expr_const_values[FKF_NB];
 
     /* audio only */
-    int audio_channels_map[SWR_CH_MAX];  /* list of the channels id to pick from the source stream */
+    int *audio_channels_map;             /* list of the channels id to pick from the source stream */
     int audio_channels_mapped;           /* number of channels in audio_channels_map */
 
     char *logfile_prefix;
@@ -487,6 +490,7 @@ extern int stdin_interaction;
 extern int frame_bits_per_raw_sample;
 extern AVIOContext *progress_avio;
 extern float max_error_rate;
+extern int vdpau_api_ver;
 
 extern const AVIOInterruptCB int_cb;
 
@@ -502,6 +506,7 @@ void show_usage(void);
 
 void opt_output_file(void *optctx, const char *filename);
 
+void remove_avoptions(AVDictionary **a, AVDictionary *b);
 void assert_avoptions(AVDictionary *m);
 
 int guess_input_channel_layout(InputStream *ist);

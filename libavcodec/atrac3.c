@@ -190,8 +190,8 @@ static av_cold int atrac3_decode_close(AVCodecContext *avctx)
 {
     ATRAC3Context *q = avctx->priv_data;
 
-    av_free(q->units);
-    av_free(q->decoded_bytes_buffer);
+    av_freep(&q->units);
+    av_freep(&q->decoded_bytes_buffer);
 
     ff_mdct_end(&q->mdct_ctx);
 
@@ -888,7 +888,7 @@ static av_cold int atrac3_decode_init(AVCodecContext *avctx)
 
     q->decoded_bytes_buffer = av_mallocz(FFALIGN(avctx->block_align, 4) +
                                          FF_INPUT_BUFFER_PADDING_SIZE);
-    if (q->decoded_bytes_buffer == NULL)
+    if (!q->decoded_bytes_buffer)
         return AVERROR(ENOMEM);
 
     avctx->sample_fmt = AV_SAMPLE_FMT_FLTP;

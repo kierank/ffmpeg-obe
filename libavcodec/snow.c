@@ -324,7 +324,7 @@ static void mc_block(Plane *p, uint8_t *dst, const uint8_t *src, int stride, int
     }
 }
 
-void ff_snow_pred_block(SnowContext *s, uint8_t *dst, uint8_t *tmp, ptrdiff_t stride, int sx, int sy, int b_w, int b_h, BlockNode *block, int plane_index, int w, int h){
+void ff_snow_pred_block(SnowContext *s, uint8_t *dst, uint8_t *tmp, ptrdiff_t stride, int sx, int sy, int b_w, int b_h, const BlockNode *block, int plane_index, int w, int h){
     if(block->type & BLOCK_INTRA){
         int x, y;
         const unsigned color  = block->color[plane_index];
@@ -703,7 +703,7 @@ av_cold void ff_snow_common_end(SnowContext *s)
     for(i=0; i<MAX_REF_FRAMES; i++){
         av_freep(&s->ref_mvs[i]);
         av_freep(&s->ref_scores[i]);
-        if(s->last_picture[i]->data[0]) {
+        if(s->last_picture[i] && s->last_picture[i]->data[0]) {
             av_assert0(s->last_picture[i]->data[0] != s->current_picture->data[0]);
         }
         av_frame_free(&s->last_picture[i]);

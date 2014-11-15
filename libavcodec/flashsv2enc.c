@@ -192,7 +192,7 @@ static av_cold int flashsv2_encode_init(AVCodecContext * avctx)
 
     if ((avctx->width > 4095) || (avctx->height > 4095)) {
         av_log(avctx, AV_LOG_ERROR,
-               "Input dimensions too large, input must be max 4096x4096 !\n");
+               "Input dimensions too large, input must be max 4095x4095 !\n");
         return -1;
     }
     if ((avctx->width < 16) || (avctx->height < 16)) {
@@ -732,7 +732,11 @@ static void recommend_keyframe(FlashSV2Context * s, int *keyframe)
 #endif
 }
 
+#ifndef FLASHSV2_DUMB
 static const double block_size_fraction = 1.0 / 300;
+static const double use15_7_threshold = 8192;
+static const double color15_7_factor = 100;
+#endif
 static int optimum_block_width(FlashSV2Context * s)
 {
 #ifndef FLASHSV2_DUMB
@@ -757,8 +761,6 @@ static int optimum_block_height(FlashSV2Context * s)
 #endif
 }
 
-static const double use15_7_threshold = 8192;
-
 static int optimum_use15_7(FlashSV2Context * s)
 {
 #ifndef FLASHSV2_DUMB
@@ -773,8 +775,6 @@ static int optimum_use15_7(FlashSV2Context * s)
     return s->avctx->global_quality == 0;
 #endif
 }
-
-static const double color15_7_factor = 100;
 
 static int optimum_dist(FlashSV2Context * s)
 {

@@ -86,6 +86,7 @@ static const struct {
     { "E",   M_E   },
     { "PI",  M_PI  },
     { "PHI", M_PHI },
+    { "QP2LAMBDA", FF_QP2LAMBDA },
 };
 
 double av_strtod(const char *numstr, char **tail)
@@ -358,7 +359,7 @@ static int parse_primary(AVExpr **e, Parser *p)
     }
 
     p->s= strchr(p->s, '(');
-    if (p->s==NULL) {
+    if (!p->s) {
         av_log(p, AV_LOG_ERROR, "Undefined constant or missing '(' in '%s'\n", s0);
         p->s= next;
         av_expr_free(d);

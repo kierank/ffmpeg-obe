@@ -80,7 +80,7 @@ typedef struct FlacSubframe {
     int shift;
     RiceContext rc;
     int32_t samples[FLAC_MAX_BLOCKSIZE];
-    int32_t residual[FLAC_MAX_BLOCKSIZE+1];
+    int32_t residual[FLAC_MAX_BLOCKSIZE+11];
 } FlacSubframe;
 
 typedef struct FlacFrame {
@@ -428,7 +428,7 @@ static av_cold int flac_encode_init(AVCodecContext *avctx)
                       s->options.max_prediction_order, FF_LPC_TYPE_LEVINSON);
 
     ff_bswapdsp_init(&s->bdsp);
-    ff_flacdsp_init(&s->flac_dsp, avctx->sample_fmt,
+    ff_flacdsp_init(&s->flac_dsp, avctx->sample_fmt, channels,
                     avctx->bits_per_raw_sample);
 
     dprint_compression_options(s);

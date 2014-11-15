@@ -111,6 +111,7 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
     ctx->params->fpsDenom        = avctx->time_base.num * avctx->ticks_per_frame;
     ctx->params->sourceWidth     = avctx->width;
     ctx->params->sourceHeight    = avctx->height;
+    ctx->params->bEnablePsnr     = !!(avctx->flags & CODEC_FLAG_PSNR);
 
     if (avctx->sample_aspect_ratio.num > 0 && avctx->sample_aspect_ratio.den > 0) {
         av_reduce(&sar_num, &sar_den,
@@ -299,6 +300,11 @@ static const AVClass class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
+static const AVCodecDefault x265_defaults[] = {
+    { "b", "0" },
+    { NULL },
+};
+
 AVCodec ff_libx265_encoder = {
     .name             = "libx265",
     .long_name        = NULL_IF_CONFIG_SMALL("libx265 H.265 / HEVC"),
@@ -310,5 +316,6 @@ AVCodec ff_libx265_encoder = {
     .close            = libx265_encode_close,
     .priv_data_size   = sizeof(libx265Context),
     .priv_class       = &class,
+    .defaults         = x265_defaults,
     .capabilities     = CODEC_CAP_DELAY | CODEC_CAP_AUTO_THREADS,
 };

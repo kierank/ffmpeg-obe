@@ -278,7 +278,7 @@ static int vp9_alloc_frame(AVCodecContext *ctx, VP9Frame *f)
 
     // retain segmentation map if it doesn't update
     if (s->segmentation.enabled && !s->segmentation.update_map &&
-        !s->intraonly && !s->keyframe) {
+        !s->intraonly && !s->keyframe && !s->errorres) {
         memcpy(f->segmentation_map, s->frames[LAST_FRAME].segmentation_map, sz);
     }
 
@@ -368,7 +368,7 @@ static int update_block_buffers(AVCodecContext *ctx)
     if (s->uses_2pass) {
         int sbs = s->sb_cols * s->sb_rows;
 
-        s->b_base = av_malloc(sizeof(VP9Block) * s->cols * s->rows);
+        s->b_base = av_malloc_array(s->cols * s->rows, sizeof(VP9Block));
         s->block_base = av_mallocz((64 * 64 + 128) * sbs * 3);
         if (!s->b_base || !s->block_base)
             return AVERROR(ENOMEM);
@@ -1344,16 +1344,20 @@ static void decode_mode(AVCodecContext *ctx)
                 vp56_rac_get_prob_branchy(&s->c,
                     s->prob.segpred[s->above_segpred_ctx[col] +
                                     s->left_segpred_ctx[row7]]))) {
-        int pred = 8, x;
-        uint8_t *refsegmap = s->frames[LAST_FRAME].segmentation_map;
+        if (!s->errorres) {
+            int pred = 8, x;
+            uint8_t *refsegmap = s->frames[LAST_FRAME].segmentation_map;
 
-        if (!s->last_uses_2pass)
-            ff_thread_await_progress(&s->frames[LAST_FRAME].tf, row >> 3, 0);
-        for (y = 0; y < h4; y++)
-            for (x = 0; x < w4; x++)
-                pred = FFMIN(pred, refsegmap[(y + row) * 8 * s->sb_cols + x + col]);
-        av_assert1(pred < 8);
-        b->seg_id = pred;
+            if (!s->last_uses_2pass)
+                ff_thread_await_progress(&s->frames[LAST_FRAME].tf, row >> 3, 0);
+            for (y = 0; y < h4; y++)
+                for (x = 0; x < w4; x++)
+                    pred = FFMIN(pred, refsegmap[(y + row) * 8 * s->sb_cols + x + col]);
+            av_assert1(pred < 8);
+            b->seg_id = pred;
+        } else {
+            b->seg_id = 0;
+        }
 
         memset(&s->above_segpred_ctx[col], 1, w4);
         memset(&s->left_segpred_ctx[row7], 1, h4);
@@ -3776,6 +3780,18 @@ static int vp9_decode_frame(AVCodecContext *ctx, void *frame,
             return res;
     }
 
+    if (s->fullrange)
+        ctx->color_range = AVCOL_RANGE_JPEG;
+    else
+        ctx->color_range = AVCOL_RANGE_MPEG;
+
+    switch (s->colorspace) {
+    case 1: ctx->colorspace = AVCOL_SPC_BT470BG; break;
+    case 2: ctx->colorspace = AVCOL_SPC_BT709; break;
+    case 3: ctx->colorspace = AVCOL_SPC_SMPTE170M; break;
+    case 4: ctx->colorspace = AVCOL_SPC_SMPTE240M; break;
+    }
+
     // main tile decode loop
     memset(s->above_partition_ctx, 0, s->cols);
     memset(s->above_skip_ctx, 0, s->cols);
@@ -3809,6 +3825,8 @@ static int vp9_decode_frame(AVCodecContext *ctx, void *frame,
                 break;
         }
         s->prob_ctx[s->framectxid].p = s->prob.p;
+        ff_thread_finish_setup(ctx);
+    } else if (!s->refreshctx) {
         ff_thread_finish_setup(ctx);
     }
 

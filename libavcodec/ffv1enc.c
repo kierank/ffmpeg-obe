@@ -166,7 +166,7 @@ static void find_best_state(uint8_t best_state[256][256],
                     best_len[k]      = len;
                     best_state[i][k] = j;
                 }
-                for (m = 0; m < 256; m++)
+                for (m = 1; m < 256; m++)
                     if (occ[m]) {
                         newocc[      one_state[      m]] += occ[m] * p;
                         newocc[256 - one_state[256 - m]] += occ[m] * (1 - p);
@@ -862,9 +862,11 @@ static av_cold int encode_init(AVCodecContext *avctx)
     }
     if (avctx->stats_in) {
         char *p = avctx->stats_in;
-        uint8_t best_state[256][256];
+        uint8_t (*best_state)[256] = av_malloc_array(256, 256);
         int gob_count = 0;
         char *next;
+        if (!best_state)
+            return AVERROR(ENOMEM);
 
         av_assert0(s->version >= 2);
 
@@ -875,6 +877,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
                     if (next == p) {
                         av_log(avctx, AV_LOG_ERROR,
                                "2Pass file invalid at %d %d [%s]\n", j, i, p);
+                        av_freep(&best_state);
                         return AVERROR_INVALIDDATA;
                     }
                     p = next;
@@ -888,6 +891,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
                                 av_log(avctx, AV_LOG_ERROR,
                                        "2Pass file invalid at %d %d %d %d [%s]\n",
                                        i, j, k, m, p);
+                                av_freep(&best_state);
                                 return AVERROR_INVALIDDATA;
                             }
                             p = next;
@@ -896,6 +900,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
             gob_count = strtol(p, &next, 0);
             if (next == p || gob_count <= 0) {
                 av_log(avctx, AV_LOG_ERROR, "2Pass file invalid\n");
+                av_freep(&best_state);
                 return AVERROR_INVALIDDATA;
             }
             p = next;
@@ -933,6 +938,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
                 }
             }
         }
+        av_freep(&best_state);
     }
 
     if (s->version > 1) {

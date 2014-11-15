@@ -288,6 +288,10 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
         return AVERROR(ENOMEM);
 
     cat->avf->interrupt_callback = avf->interrupt_callback;
+
+    if ((ret = ff_copy_whitelists(cat->avf, avf)) < 0)
+        return ret;
+
     if ((ret = avformat_open_input(&cat->avf, file->url, NULL, NULL)) < 0 ||
         (ret = avformat_find_stream_info(cat->avf, NULL)) < 0) {
         av_log(avf, AV_LOG_ERROR, "Impossible to open '%s'\n", file->url);
@@ -345,7 +349,7 @@ static int concat_read_header(AVFormatContext *avf)
                 FAIL(AVERROR_INVALIDDATA);
             }
             if ((ret = add_file(avf, filename, &file, &nb_files_alloc)) < 0)
-                FAIL(ret);
+                goto fail;
         } else if (!strcmp(keyword, "duration")) {
             char *dur_str = get_keyword(&cursor);
             int64_t dur;
@@ -357,7 +361,7 @@ static int concat_read_header(AVFormatContext *avf)
             if ((ret = av_parse_time(&dur, dur_str, 1)) < 0) {
                 av_log(avf, AV_LOG_ERROR, "Line %d: invalid duration '%s'\n",
                        line, dur_str);
-                FAIL(ret);
+                goto fail;
             }
             file->duration = dur;
         } else if (!strcmp(keyword, "stream")) {
@@ -387,7 +391,7 @@ static int concat_read_header(AVFormatContext *avf)
         }
     }
     if (ret < 0)
-        FAIL(ret);
+        goto fail;
     if (!cat->nb_files)
         FAIL(AVERROR_INVALIDDATA);
 
@@ -408,7 +412,7 @@ static int concat_read_header(AVFormatContext *avf)
     cat->stream_match_mode = avf->nb_streams ? MATCH_EXACT_ID :
                                                MATCH_ONE_TO_ONE;
     if ((ret = open_file(avf, 0)) < 0)
-        FAIL(ret);
+        goto fail;
     return 0;
 
 fail:

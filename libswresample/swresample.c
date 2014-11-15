@@ -62,23 +62,47 @@ struct SwrContext *swr_alloc_set_opts(struct SwrContext *s,
     s->log_level_offset= log_offset;
     s->log_ctx= log_ctx;
 
-    av_opt_set_int(s, "ocl", out_ch_layout,   0);
-    av_opt_set_int(s, "osf", out_sample_fmt,  0);
-    av_opt_set_int(s, "osr", out_sample_rate, 0);
-    av_opt_set_int(s, "icl", in_ch_layout,    0);
-    av_opt_set_int(s, "isf", in_sample_fmt,   0);
-    av_opt_set_int(s, "isr", in_sample_rate,  0);
-    av_opt_set_int(s, "tsf", AV_SAMPLE_FMT_NONE,   0);
-    av_opt_set_int(s, "ich", av_get_channel_layout_nb_channels(s-> in_ch_layout), 0);
-    av_opt_set_int(s, "och", av_get_channel_layout_nb_channels(s->out_ch_layout), 0);
+    if (av_opt_set_int(s, "ocl", out_ch_layout,   0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "osf", out_sample_fmt,  0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "osr", out_sample_rate, 0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "icl", in_ch_layout,    0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "isf", in_sample_fmt,   0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "isr", in_sample_rate,  0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "tsf", AV_SAMPLE_FMT_NONE,   0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "ich", av_get_channel_layout_nb_channels(s-> in_ch_layout), 0) < 0)
+        goto fail;
+
+    if (av_opt_set_int(s, "och", av_get_channel_layout_nb_channels(s->out_ch_layout), 0) < 0)
+        goto fail;
+
     av_opt_set_int(s, "uch", 0, 0);
     return s;
+fail:
+    av_log(s, AV_LOG_ERROR, "Failed to set option\n");
+    swr_free(&s);
+    return NULL;
 }
 
 static void set_audiodata_fmt(AudioData *a, enum AVSampleFormat fmt){
     a->fmt   = fmt;
     a->bps   = av_get_bytes_per_sample(fmt);
     a->planar= av_sample_fmt_is_planar(fmt);
+    if (a->ch_count == 1)
+        a->planar = 1;
 }
 
 static void free_temp(AudioData *a){
@@ -411,9 +435,15 @@ static int resample(SwrContext *s, AudioData *out_param, int out_count,
 
     border = s->resampler->invert_initial_buffer(s->resample, &s->in_buffer,
                  &in, in_count, &s->in_buffer_index, &s->in_buffer_count);
-    if (border == INT_MAX) return 0;
-    else if (border < 0) return border;
-    else if (border) { buf_set(&in, &in, border); in_count -= border; s->resample_in_constraint = 0; }
+    if (border == INT_MAX) {
+        return 0;
+    } else if (border < 0) {
+        return border;
+    } else if (border) {
+        buf_set(&in, &in, border);
+        in_count -= border;
+        s->resample_in_constraint = 0;
+    }
 
     do{
         int ret, size, consumed;
@@ -639,11 +669,13 @@ int swr_convert(struct SwrContext *s, uint8_t *out_arg[SWR_CH_MAX], int out_coun
         in_count = 0;
         if(ret>0) {
             s->drop_output -= ret;
+            if (!s->drop_output && !out_arg)
+                return 0;
             continue;
         }
 
-        if(s->drop_output || !out_arg)
-            return 0;
+        av_assert0(s->drop_output);
+        return 0;
     }
 
     if(!in_arg){
@@ -720,13 +752,14 @@ int swr_convert(struct SwrContext *s, uint8_t *out_arg[SWR_CH_MAX], int out_coun
 }
 
 int swr_drop_output(struct SwrContext *s, int count){
+    const uint8_t *tmp_arg[SWR_CH_MAX];
     s->drop_output += count;
 
     if(s->drop_output <= 0)
         return 0;
 
     av_log(s, AV_LOG_VERBOSE, "discarding %d audio samples\n", count);
-    return swr_convert(s, NULL, s->drop_output, NULL, 0);
+    return swr_convert(s, NULL, s->drop_output, tmp_arg, 0);
 }
 
 int swr_inject_silence(struct SwrContext *s, int count){

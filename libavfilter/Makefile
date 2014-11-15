@@ -29,7 +29,6 @@ OBJS = allfilters.o                                                     \
 
 OBJS-$(CONFIG_AVCODEC)                       += avcodec.o
 
-OBJS-$(CONFIG_ACONVERT_FILTER)               += af_aconvert.o
 OBJS-$(CONFIG_ADELAY_FILTER)                 += af_adelay.o
 OBJS-$(CONFIG_AECHO_FILTER)                  += af_aecho.o
 OBJS-$(CONFIG_AEVAL_FILTER)                  += aeval.o
@@ -78,6 +77,7 @@ OBJS-$(CONFIG_PAN_FILTER)                    += af_pan.o
 OBJS-$(CONFIG_REPLAYGAIN_FILTER)             += af_replaygain.o
 OBJS-$(CONFIG_RESAMPLE_FILTER)               += af_resample.o
 OBJS-$(CONFIG_SILENCEDETECT_FILTER)          += af_silencedetect.o
+OBJS-$(CONFIG_SILENCEREMOVE_FILTER)          += af_silenceremove.o
 OBJS-$(CONFIG_TREBLE_FILTER)                 += af_biquads.o
 OBJS-$(CONFIG_VOLUME_FILTER)                 += af_volume.o
 OBJS-$(CONFIG_VOLUMEDETECT_FILTER)           += af_volumedetect.o
@@ -97,6 +97,7 @@ OBJS-$(CONFIG_BLACKDETECT_FILTER)            += vf_blackdetect.o
 OBJS-$(CONFIG_BLACKFRAME_FILTER)             += vf_blackframe.o
 OBJS-$(CONFIG_BLEND_FILTER)                  += vf_blend.o dualinput.o framesync.o
 OBJS-$(CONFIG_BOXBLUR_FILTER)                += vf_boxblur.o
+OBJS-$(CONFIG_CODECVIEW_FILTER)              += vf_codecview.o
 OBJS-$(CONFIG_COLORBALANCE_FILTER)           += vf_colorbalance.o
 OBJS-$(CONFIG_COLORCHANNELMIXER_FILTER)      += vf_colorchannelmixer.o
 OBJS-$(CONFIG_COLORMATRIX_FILTER)            += vf_colormatrix.o
@@ -138,6 +139,7 @@ OBJS-$(CONFIG_IL_FILTER)                     += vf_il.o
 OBJS-$(CONFIG_INTERLACE_FILTER)              += vf_interlace.o
 OBJS-$(CONFIG_INTERLEAVE_FILTER)             += f_interleave.o
 OBJS-$(CONFIG_KERNDEINT_FILTER)              += vf_kerndeint.o
+OBJS-$(CONFIG_LENSCORRECTION_FILTER)         += vf_lenscorrection.o
 OBJS-$(CONFIG_LUT3D_FILTER)                  += vf_lut3d.o
 OBJS-$(CONFIG_LUT_FILTER)                    += vf_lut.o
 OBJS-$(CONFIG_LUTRGB_FILTER)                 += vf_lut.o
@@ -196,6 +198,7 @@ OBJS-$(CONFIG_VIDSTABDETECT_FILTER)          += vidstabutils.o vf_vidstabdetect.
 OBJS-$(CONFIG_VIDSTABTRANSFORM_FILTER)       += vidstabutils.o vf_vidstabtransform.o
 OBJS-$(CONFIG_VIGNETTE_FILTER)               += vf_vignette.o
 OBJS-$(CONFIG_W3FDIF_FILTER)                 += vf_w3fdif.o
+OBJS-$(CONFIG_XBR_FILTER)                    += vf_xbr.o
 OBJS-$(CONFIG_YADIF_FILTER)                  += vf_yadif.o
 OBJS-$(CONFIG_ZMQ_FILTER)                    += f_zmq.o
 OBJS-$(CONFIG_ZOOMPAN_FILTER)                += vf_zoompan.o
@@ -243,6 +246,7 @@ SKIPHEADERS-$(CONFIG_LIBVIDSTAB)             += vidstabutils.h
 SKIPHEADERS-$(CONFIG_OPENCL)                 += opencl_internal.h deshake_opencl_kernel.h unsharp_opencl_kernel.h
 
 OBJS-$(HAVE_THREADS)                         += pthread.o
+OBJS-$(CONFIG_SHARED)                        += log2_tab.o
 
 TOOLS     = graph2dot
 TESTPROGS = drawutils filtfmts formats

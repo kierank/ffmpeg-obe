@@ -45,6 +45,9 @@
 #define P_MEDIAN P[4]
 #define P_MV1 P[9]
 
+#define ME_MAP_SHIFT 3
+#define ME_MAP_MV_BITS 11
+
 static int sad_hpel_motion_search(MpegEncContext * s,
                                   int *mx_ptr, int *my_ptr, int dmin,
                                   int src_index, int ref_index,
@@ -968,27 +971,7 @@ void ff_estimate_p_frame_motion(MpegEncContext * s,
     pic->mc_mb_var[s->mb_stride * mb_y + mb_x] = (vard+128)>>8;
     c->mc_mb_var_sum_temp += (vard+128)>>8;
 
-    if(mb_type){
-        int p_score= FFMIN(vard, varc-500+(s->lambda2>>FF_LAMBDA_SHIFT)*100);
-        int i_score= varc-500+(s->lambda2>>FF_LAMBDA_SHIFT)*20;
-        c->scene_change_score+= ff_sqrt(p_score) - ff_sqrt(i_score);
-
-        if(mb_type == CANDIDATE_MB_TYPE_INTER){
-            c->sub_motion_search(s, &mx, &my, dmin, 0, 0, 0, 16);
-            set_p_mv_tables(s, mx, my, 1);
-        }else{
-            mx <<=shift;
-            my <<=shift;
-        }
-        if(mb_type == CANDIDATE_MB_TYPE_INTER4V){
-            h263_mv4_search(s, mx, my, shift);
-
-            set_p_mv_tables(s, mx, my, 0);
-        }
-        if(mb_type == CANDIDATE_MB_TYPE_INTER_I){
-            interlaced_search(s, 0, s->p_field_mv_table, s->p_field_select_table, mx, my, 1);
-        }
-    }else if(c->avctx->mb_decision > FF_MB_DECISION_SIMPLE){
+    if (c->avctx->mb_decision > FF_MB_DECISION_SIMPLE) {
         int p_score= FFMIN(vard, varc-500+(s->lambda2>>FF_LAMBDA_SHIFT)*100);
         int i_score= varc-500+(s->lambda2>>FF_LAMBDA_SHIFT)*20;
         c->scene_change_score+= ff_sqrt(p_score) - ff_sqrt(i_score);
@@ -1750,7 +1733,7 @@ void ff_fix_long_mvs(MpegEncContext * s, uint8_t *field_select_table, int field_
         int xy= y*s->mb_stride;
         for(x=0; x<s->mb_width; x++){
             if (s->mb_type[xy] & type){    // RAL: "type" test added...
-                if(field_select_table==NULL || field_select_table[xy] == field_select){
+                if (!field_select_table || field_select_table[xy] == field_select) {
                     if(   mv_table[xy][0] >=h_range || mv_table[xy][0] <-h_range
                        || mv_table[xy][1] >=v_range || mv_table[xy][1] <-v_range){
 

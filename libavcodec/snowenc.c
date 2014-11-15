@@ -390,7 +390,6 @@ static int encode_q_branch(SnowContext *s, int level, int x, int y){
     i_len= ic.bytestream - ic.bytestream_start;
     iscore += (s->lambda2*(get_rac_count(&ic)-base_bits))>>FF_LAMBDA_SHIFT;
 
-//    assert(score==256*256*256*64-1);
     av_assert1(iscore < 255*255*256 + s->lambda2*10);
     av_assert1(iscore >= 0);
     av_assert1(l>=0 && l<=255);
@@ -1871,6 +1870,7 @@ static av_cold int encode_end(AVCodecContext *avctx)
 #define OFFSET(x) offsetof(SnowContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
+    FF_MPV_COMMON_OPTS
     { "memc_only",      "Only do ME/MC (I frames -> ref, P frame -> ME+MC).",   OFFSET(memc_only), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
     { "no_bitstream",   "Skip final bitstream writeout.",                    OFFSET(no_bitstream), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
     { NULL },

@@ -30,6 +30,7 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/intfloat.h"
+#include "libavutil/time_internal.h"
 #include "avformat.h"
 #include "internal.h"
 #include "wtv.h"
@@ -76,7 +77,7 @@ static int wtvfile_read_packet(void *opaque, uint8_t *buf, int buf_size)
 
     if (wf->error || pb->error)
         return -1;
-    if (wf->position >= wf->length || url_feof(pb))
+    if (wf->position >= wf->length || avio_feof(pb))
         return 0;
 
     buf_size = FFMIN(buf_size, wf->length - wf->position);
@@ -386,10 +387,12 @@ static int read_probe(AVProbeData *p)
 static int filetime_to_iso8601(char *buf, int buf_size, int64_t value)
 {
     time_t t = (value / 10000000LL) - 11644473600LL;
-    struct tm *tm = gmtime(&t);
+    struct tm tmbuf;
+    struct tm *tm = gmtime_r(&t, &tmbuf);
     if (!tm)
         return -1;
-    strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", gmtime(&t));
+    if (!strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", tm))
+        return -1;
     return 0;
 }
 
@@ -400,10 +403,12 @@ static int filetime_to_iso8601(char *buf, int buf_size, int64_t value)
 static int crazytime_to_iso8601(char *buf, int buf_size, int64_t value)
 {
     time_t t = (value / 10000000LL) - 719162LL*86400LL;
-    struct tm *tm = gmtime(&t);
+    struct tm tmbuf;
+    struct tm *tm = gmtime_r(&t, &tmbuf);
     if (!tm)
         return -1;
-    strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", gmtime(&t));
+    if (!strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", tm))
+        return -1;
     return 0;
 }
 
@@ -414,10 +419,12 @@ static int crazytime_to_iso8601(char *buf, int buf_size, int64_t value)
 static int oledate_to_iso8601(char *buf, int buf_size, int64_t value)
 {
     time_t t = (av_int2double(value) - 25569.0) * 86400;
-    struct tm *result= gmtime(&t);
-    if (!result)
+    struct tm tmbuf;
+    struct tm *tm= gmtime_r(&t, &tmbuf);
+    if (!tm)
         return -1;
-    strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", result);
+    if (!strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", tm))
+        return -1;
     return 0;
 }
 
@@ -533,7 +540,7 @@ static void parse_legacy_attrib(AVFormatContext *s, AVIOContext *pb)
 {
     ff_asf_guid guid;
     int length, type;
-    while(!url_feof(pb)) {
+    while(!avio_feof(pb)) {
         char key[1024];
         ff_get_guid(pb, &guid);
         type   = avio_rl32(pb);
@@ -751,6 +758,26 @@ enum {
 };
 
 /**
+ * Try to seek over a broken chunk
+ * @return <0 on error
+ */
+static int recover(WtvContext *wtv, uint64_t broken_pos)
+{
+    AVIOContext *pb = wtv->pb;
+    int i;
+    for (i = 0; i < wtv->nb_index_entries; i++) {
+        if (wtv->index_entries[i].pos > broken_pos) {
+            int ret = avio_seek(pb, wtv->index_entries[i].pos, SEEK_SET);
+            if (ret < 0)
+                return ret;
+            wtv->pts = wtv->index_entries[i].timestamp;
+            return 0;
+         }
+     }
+     return AVERROR(EIO);
+}
+
+/**
  * Parse WTV chunks
  * @param mode SEEK_TO_DATA or SEEK_TO_PTS
  * @param seekts timestamp
@@ -761,14 +788,21 @@ static int parse_chunks(AVFormatContext *s, int mode, int64_t seekts, int *len_p
 {
     WtvContext *wtv = s->priv_data;
     AVIOContext *pb = wtv->pb;
-    while (!url_feof(pb)) {
+    while (!avio_feof(pb)) {
         ff_asf_guid g;
         int len, sid, consumed;
 
         ff_get_guid(pb, &g);
         len = avio_rl32(pb);
-        if (len < 32)
-            break;
+        if (len < 32) {
+            int ret;
+            if (avio_feof(pb))
+                return AVERROR_EOF;
+            av_log(s, AV_LOG_WARNING, "encountered broken chunk\n");
+            if ((ret = recover(wtv, avio_tell(pb) - 20)) < 0)
+                return ret;
+            continue;
+        }
         sid = avio_rl32(pb) & 0x7FFF;
         avio_skip(pb, 8);
         consumed = 32;
@@ -947,7 +981,9 @@ static int read_header(AVFormatContext *s)
     avio_skip(s->pb, 4);
     root_sector = avio_rl32(s->pb);
 
-    seek_by_sector(s->pb, root_sector, 0);
+    ret = seek_by_sector(s->pb, root_sector, 0);
+    if (ret < 0)
+        return ret;
     root_size = avio_read(s->pb, root, root_size);
     if (root_size < 0)
         return AVERROR_INVALIDDATA;
@@ -981,7 +1017,7 @@ static int read_header(AVFormatContext *s)
             while(1) {
                 uint64_t timestamp = avio_rl64(pb);
                 uint64_t frame_nb  = avio_rl64(pb);
-                if (url_feof(pb))
+                if (avio_feof(pb))
                     break;
                 ff_add_index_entry(&wtv->index_entries, &wtv->nb_index_entries, &wtv->index_entries_allocated_size,
                                    0, timestamp, frame_nb, 0, AVINDEX_KEYFRAME);
@@ -995,7 +1031,7 @@ static int read_header(AVFormatContext *s)
                     while (1) {
                         uint64_t frame_nb = avio_rl64(pb);
                         uint64_t position = avio_rl64(pb);
-                        if (url_feof(pb))
+                        if (avio_feof(pb))
                             break;
                         for (i = wtv->nb_index_entries - 1; i >= 0; i--) {
                             AVIndexEntry *e = wtv->index_entries + i;

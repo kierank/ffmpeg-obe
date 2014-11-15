@@ -223,7 +223,7 @@ static int flv_write_header(AVFormatContext *s)
             }
             if (enc->codec_id == AV_CODEC_ID_MPEG4 ||
                 enc->codec_id == AV_CODEC_ID_H263) {
-                int error = enc->strict_std_compliance > FF_COMPLIANCE_UNOFFICIAL;
+                int error = s->strict_std_compliance > FF_COMPLIANCE_UNOFFICIAL;
                 av_log(s, error ? AV_LOG_ERROR : AV_LOG_WARNING,
                        "Codec %s is not supported in the official FLV specification,\n", avcodec_get_name(enc->codec_id));
 
@@ -248,7 +248,7 @@ static int flv_write_header(AVFormatContext *s)
                        "16-bit big-endian audio in flv is valid but most likely unplayable (hardware dependent); use s16le\n");
             break;
         case AVMEDIA_TYPE_DATA:
-            if (enc->codec_id != AV_CODEC_ID_TEXT) {
+            if (enc->codec_id != AV_CODEC_ID_TEXT && enc->codec_id != AV_CODEC_ID_NONE) {
                 av_log(s, AV_LOG_ERROR, "Data codec '%s' for stream %d is not compatible with FLV\n",
                        avcodec_get_name(enc->codec_id), i);
                 return AVERROR_INVALIDDATA;
@@ -521,7 +521,7 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
                (AV_RB16(pkt->data) & 0xfff0) == 0xfff0) {
         if (!s->streams[pkt->stream_index]->nb_frames) {
         av_log(s, AV_LOG_ERROR, "Malformed AAC bitstream detected: "
-               "use audio bitstream filter 'aac_adtstoasc' to fix it "
+               "use the audio bitstream filter 'aac_adtstoasc' to fix it "
                "('-bsf:a aac_adtstoasc' option with ffmpeg)\n");
         return AVERROR_INVALIDDATA;
         }
@@ -548,6 +548,12 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (sc->last_ts < ts)
         sc->last_ts = ts;
 
+    if (size + flags_size >= 1<<24) {
+        av_log(s, AV_LOG_ERROR, "Too large packet with size %u >= %u\n",
+               size + flags_size, 1<<24);
+        return AVERROR(EINVAL);
+    }
+
     avio_wb24(pb, size + flags_size);
     avio_wb24(pb, ts & 0xFFFFFF);
     avio_w8(pb, (ts >> 24) & 0x7F); // timestamps are 32 bits _signed_
@@ -556,18 +562,24 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (enc->codec_type == AVMEDIA_TYPE_DATA) {
         int data_size;
         int64_t metadata_size_pos = avio_tell(pb);
-        avio_w8(pb, AMF_DATA_TYPE_STRING);
-        put_amf_string(pb, "onTextData");
-        avio_w8(pb, AMF_DATA_TYPE_MIXEDARRAY);
-        avio_wb32(pb, 2);
-        put_amf_string(pb, "type");
-        avio_w8(pb, AMF_DATA_TYPE_STRING);
-        put_amf_string(pb, "Text");
-        put_amf_string(pb, "text");
-        avio_w8(pb, AMF_DATA_TYPE_STRING);
-        put_amf_string(pb, pkt->data);
-        put_amf_string(pb, "");
-        avio_w8(pb, AMF_END_OF_OBJECT);
+        if (enc->codec_id == AV_CODEC_ID_TEXT) {
+            // legacy FFmpeg magic?
+            avio_w8(pb, AMF_DATA_TYPE_STRING);
+            put_amf_string(pb, "onTextData");
+            avio_w8(pb, AMF_DATA_TYPE_MIXEDARRAY);
+            avio_wb32(pb, 2);
+            put_amf_string(pb, "type");
+            avio_w8(pb, AMF_DATA_TYPE_STRING);
+            put_amf_string(pb, "Text");
+            put_amf_string(pb, "text");
+            avio_w8(pb, AMF_DATA_TYPE_STRING);
+            put_amf_string(pb, pkt->data);
+            put_amf_string(pb, "");
+            avio_w8(pb, AMF_END_OF_OBJECT);
+        } else {
+            // just pass the metadata through
+            avio_write(pb, data ? data : pkt->data, size);
+        }
         /* write total size of tag */
         data_size = avio_tell(pb) - metadata_size_pos;
         avio_seek(pb, metadata_size_pos - 10, SEEK_SET);

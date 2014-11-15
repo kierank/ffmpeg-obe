@@ -86,9 +86,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     int i, plane, vsub = desc->log2_chroma_h;
 
     for (plane = 0; plane < 4 && frame->data[plane] && frame->linesize[plane]; plane++) {
-        int64_t linesize = av_image_get_linesize(frame->format, frame->width, plane);
         uint8_t *data = frame->data[plane];
         int h = plane == 1 || plane == 2 ? FF_CEIL_RSHIFT(inlink->h, vsub) : inlink->h;
+        int linesize = av_image_get_linesize(frame->format, frame->width, plane);
 
         if (linesize < 0)
             return linesize;
@@ -146,6 +146,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
         case AV_FRAME_DATA_DISPLAYMATRIX:
             av_log(ctx, AV_LOG_INFO, "displaymatrix: rotation of %.2f degrees",
                    av_display_rotation_get((int32_t *)sd->data));
+            break;
+        case AV_FRAME_DATA_AFD:
+            av_log(ctx, AV_LOG_INFO, "afd: value of %"PRIu8, sd->data[0]);
             break;
         default:
             av_log(ctx, AV_LOG_WARNING, "unknown side data type %d (%d bytes)",

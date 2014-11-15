@@ -130,7 +130,7 @@ Go to @url{http://x265.org/developers.html} and follow the instructions
 for installing the library. Then pass @code{--enable-libx265} to configure
 to enable it.
 
-@float note
+@float NOTE
 x265 is under the GNU Public License Version 2 or later
 (see @url{http://www.gnu.org/licenses/old-licenses/gpl-2.0.html} for
 details), you must upgrade FFmpeg's license to GPL in order to use it.
@@ -454,6 +454,7 @@ library:
 @item Sony Wave64 (W64)         @tab X @tab X
 @item SoX native format         @tab X @tab X
 @item SUN AU format             @tab X @tab X
+@item SUP raw PGS subtitles     @tab   @tab X
 @item Text files                @tab   @tab X
 @item THP                       @tab   @tab X
     @tab Used on the Nintendo GameCube.
@@ -1030,6 +1031,7 @@ performance on systems without hardware floating point support).
 @item PJS (Phoenix)    @tab   @tab X @tab   @tab X
 @item RealText         @tab   @tab X @tab   @tab X
 @item SAMI             @tab   @tab X @tab   @tab X
+@item Spruce format (STL) @tab   @tab X @tab   @tab X
 @item SSA/ASS          @tab X @tab X @tab X @tab X
 @item SubRip (SRT)     @tab X @tab X @tab X @tab X
 @item SubViewer v1     @tab   @tab X @tab   @tab X
@@ -1055,6 +1057,7 @@ performance on systems without hardware floating point support).
 @item HLS          @tab X
 @item HTTP         @tab X
 @item HTTPS        @tab X
+@item Icecast      @tab X
 @item MMSH         @tab X
 @item MMST         @tab X
 @item pipe         @tab X
