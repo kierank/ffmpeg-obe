@@ -1318,7 +1318,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                            cpu_flags, srcFilter->lumH, dstFilter->lumH,
                            c->param,
                            get_local_pos(c, 0, 0, 0),
-                           &c->needs_hyscale) < 0)) < 0)
+                           &c->needs_hyscale)) < 0)
                 goto fail;
             if ((ret = initFilter(&c->hChrFilter, &c->hChrFilterPos,
                            &c->hChrFilterSize, c->chrXInc,
