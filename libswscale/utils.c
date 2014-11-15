@@ -1318,6 +1318,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                            cpu_flags, srcFilter->lumH, dstFilter->lumH,
                            c->param,
                            get_local_pos(c, 0, 0, 0),
+                           get_local_pos(c, 0, 0, 0),
                            &c->needs_hyscale)) < 0)
                 goto fail;
             if ((ret = initFilter(&c->hChrFilter, &c->hChrFilterPos,
@@ -1328,7 +1329,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                            c->param,
                            get_local_pos(c, c->chrSrcHSubSample, c->src_h_chr_pos, 0),
                            get_local_pos(c, c->chrDstHSubSample, c->dst_h_chr_pos, 0),
-                           &c->needs_hcscale) < 0))
+                           &c->needs_hcscale)) < 0)
                 goto fail;
         }
     } // initialize horizontal stuff
@@ -1343,6 +1344,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                        (flags & SWS_BICUBLIN) ? (flags | SWS_BICUBIC) : flags,
                        cpu_flags, srcFilter->lumV, dstFilter->lumV,
                        c->param,
+                       get_local_pos(c, 0, 0, 1),
                        get_local_pos(c, 0, 0, 1),
                        &c->needs_vyscale)) < 0)
             goto fail;
