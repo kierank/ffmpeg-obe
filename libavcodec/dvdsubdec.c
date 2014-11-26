@@ -605,13 +605,22 @@ static int parse_ifo_palette(DVDSubContext *ctx, char *p)
         ret = AVERROR_INVALIDDATA;
         goto end;
     }
-    fseek(ifo, 0xCC, SEEK_SET);
+    if (fseek(ifo, 0xCC, SEEK_SET) == -1) {
+        ret = AVERROR(errno);
+        goto end;
+    }
     if (fread(&sp_pgci, 4, 1, ifo) == 1) {
         pgci = av_be2ne32(sp_pgci) * 2048;
-        fseek(ifo, pgci + 0x0C, SEEK_SET);
+        if (fseek(ifo, pgci + 0x0C, SEEK_SET) == -1) {
+            ret = AVERROR(errno);
+            goto end;
+        }
         if (fread(&off_pgc, 4, 1, ifo) == 1) {
             pgc = pgci + av_be2ne32(off_pgc);
-            fseek(ifo, pgc + 0xA4, SEEK_SET);
+            if (fseek(ifo, pgc + 0xA4, SEEK_SET) == -1) {
+                ret = AVERROR(errno);
+                goto end;
+            }
             if (fread(yuv, 64, 1, ifo) == 1) {
                 buf = yuv;
                 for(i=0; i<16; i++) {
@@ -640,6 +649,7 @@ static int dvdsub_parse_extradata(AVCodecContext *avctx)
 {
     DVDSubContext *ctx = (DVDSubContext*) avctx->priv_data;
     char *dataorig, *data;
+    int ret = 1;
 
     if (!avctx->extradata || !avctx->extradata_size)
         return 1;
@@ -660,11 +670,9 @@ static int dvdsub_parse_extradata(AVCodecContext *avctx)
         } else if (strncmp("size:", data, 5) == 0) {
             int w, h;
             if (sscanf(data + 5, "%dx%d", &w, &h) == 2) {
-               int ret = ff_set_dimensions(avctx, w, h);
-               if (ret < 0) {
-                   av_free(dataorig);
-                   return ret;
-               }
+               ret = ff_set_dimensions(avctx, w, h);
+               if (ret < 0)
+                   goto fail;
             }
         }
 
@@ -672,8 +680,9 @@ static int dvdsub_parse_extradata(AVCodecContext *avctx)
         data += strspn(data, "\n\r");
     }
 
+fail:
     av_free(dataorig);
-    return 1;
+    return ret;
 }
 
 static av_cold int dvdsub_init(AVCodecContext *avctx)

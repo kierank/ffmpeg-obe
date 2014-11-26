@@ -916,7 +916,7 @@ typedef struct AVStream {
     /**
      * Stream information used internally by av_find_stream_info()
      */
-#define MAX_STD_TIMEBASES (60*12+6)
+#define MAX_STD_TIMEBASES (30*12+7+6)
     struct {
         int64_t last_dts;
         int64_t duration_gcd;
@@ -1097,11 +1097,26 @@ typedef struct AVStream {
      */
     int inject_global_side_data;
 
+    /**
+     * String containing paris of key and values describing recommended encoder configuration.
+     * Paris are separated by ','.
+     * Keys are separated from values by '='.
+     */
+    char *recommended_encoder_configuration;
+
+    /**
+     * display aspect ratio (0 if unknown)
+     * - encoding: unused
+     * - decoding: Set by libavformat to calculate sample_aspect_ratio internally
+     */
+    AVRational display_aspect_ratio;
 } AVStream;
 
 AVRational av_stream_get_r_frame_rate(const AVStream *s);
 void       av_stream_set_r_frame_rate(AVStream *s, AVRational r);
 struct AVCodecParserContext *av_stream_get_parser(const AVStream *s);
+char* av_stream_get_recommended_encoder_configuration(const AVStream *s);
+void  av_stream_set_recommended_encoder_configuration(AVStream *s, char *configuration);
 
 /**
  * Returns the pts of the last muxed packet + its duration

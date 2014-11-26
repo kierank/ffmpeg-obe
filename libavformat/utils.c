@@ -103,6 +103,7 @@ static int64_t wrap_timestamp(AVStream *st, int64_t timestamp)
 }
 
 MAKE_ACCESSORS(AVStream, stream, AVRational, r_frame_rate)
+MAKE_ACCESSORS(AVStream, stream, char *, recommended_encoder_configuration)
 MAKE_ACCESSORS(AVFormatContext, format, AVCodec *, video_codec)
 MAKE_ACCESSORS(AVFormatContext, format, AVCodec *, audio_codec)
 MAKE_ACCESSORS(AVFormatContext, format, AVCodec *, subtitle_codec)
@@ -2786,10 +2787,16 @@ static void compute_chapters_end(AVFormatContext *s)
 
 static int get_std_framerate(int i)
 {
-    if (i < 60 * 12)
+    if (i < 30*12)
         return (i + 1) * 1001;
-    else
-        return ((const int[]) { 24, 30, 60, 12, 15, 48 })[i - 60 * 12] * 1000 * 12;
+    i -= 30*12;
+
+    if (i < 7)
+        return ((const int[]) { 40, 48, 50, 60, 80, 120, 240})[i] * 1001 * 12;
+
+    i -= 7;
+
+    return ((const int[]) { 24, 30, 60, 12, 15, 48 })[i] * 1000 * 12;
 }
 
 /* Is the time base unreliable?
@@ -3346,6 +3353,11 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
                     st->r_frame_rate.den = st->time_base.num;
                 }
             }
+            if (st->display_aspect_ratio.num && st->display_aspect_ratio.den) {
+                AVRational hw_ratio = { st->codec->height, st->codec->width };
+                st->sample_aspect_ratio = av_mul_q(st->display_aspect_ratio,
+                                                   hw_ratio);
+            }
         } else if (st->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
             if (!st->codec->bits_per_coded_sample)
                 st->codec->bits_per_coded_sample =
@@ -3537,6 +3549,7 @@ void ff_free_stream(AVFormatContext *s, AVStream *st) {
     if (st->info)
         av_freep(&st->info->duration_error);
     av_freep(&st->info);
+    av_freep(&st->recommended_encoder_configuration);
     av_freep(&s->streams[ --s->nb_streams ]);
 }
 

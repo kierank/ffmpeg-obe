@@ -557,13 +557,13 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
         AVStream *st = s->streams[pkt->stream_index];
         int64_t offset = st->mux_ts_offset;
 
-        if (!s->offset && pkt->dts != AV_NOPTS_VALUE &&
+        if (s->offset == AV_NOPTS_VALUE && pkt->dts != AV_NOPTS_VALUE &&
             (pkt->dts < 0 || s->avoid_negative_ts == AVFMT_AVOID_NEG_TS_MAKE_ZERO)) {
             s->offset = -pkt->dts;
             s->offset_timebase = st->time_base;
         }
 
-        if (s->offset && !offset) {
+        if (s->offset != AV_NOPTS_VALUE && !offset) {
             offset = st->mux_ts_offset =
                 av_rescale_q_rnd(s->offset,
                                  s->offset_timebase,
@@ -926,7 +926,7 @@ int av_write_trailer(AVFormatContext *s)
     for (;; ) {
         AVPacket pkt;
         ret = interleave_packet(s, &pkt, NULL, 1);
-        if (ret < 0) //FIXME cleanup needed for ret<0 ?
+        if (ret < 0)
             goto fail;
         if (!ret)
             break;
@@ -943,10 +943,14 @@ int av_write_trailer(AVFormatContext *s)
             goto fail;
     }
 
-    if (s->oformat->write_trailer)
-        ret = s->oformat->write_trailer(s);
-
 fail:
+    if (s->oformat->write_trailer)
+        if (ret >= 0) {
+        ret = s->oformat->write_trailer(s);
+        } else {
+            s->oformat->write_trailer(s);
+        }
+
     if (s->pb)
        avio_flush(s->pb);
     if (ret == 0)

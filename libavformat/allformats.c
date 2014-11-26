@@ -74,6 +74,7 @@ void av_register_all(void)
     REGISTER_DEMUXER (ANM,              anm);
     REGISTER_DEMUXER (APC,              apc);
     REGISTER_DEMUXER (APE,              ape);
+    REGISTER_DEMUXER (APNG,             apng);
     REGISTER_DEMUXER (AQTITLE,          aqtitle);
     REGISTER_MUXDEMUX(ASF,              asf);
     REGISTER_MUXDEMUX(ASS,              ass);
@@ -101,6 +102,7 @@ void av_register_all(void)
     REGISTER_DEMUXER (CINE,             cine);
     REGISTER_DEMUXER (CONCAT,           concat);
     REGISTER_MUXER   (CRC,              crc);
+    REGISTER_MUXER   (DASH,             dash);
     REGISTER_MUXDEMUX(DATA,             data);
     REGISTER_MUXDEMUX(DAUD,             daud);
     REGISTER_DEMUXER (DFA,              dfa);
