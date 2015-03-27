@@ -36,9 +36,6 @@
 #include "mpegutils.h"
 #include "mpegvideo.h"
 
-#undef NDEBUG
-#include <assert.h>
-
 #define P_LEFT P[1]
 #define P_TOP P[2]
 #define P_TOPRIGHT P[3]
@@ -193,7 +190,13 @@ static av_always_inline int cmp_inline(MpegEncContext *s, const int x, const int
         int uvdxy;              /* no, it might not be used uninitialized */
         if(dxy){
             if(qpel){
-                c->qpel_put[size][dxy](c->temp, ref[0] + x + y*stride, stride); //FIXME prototype (add h)
+                if (h << size == 16) {
+                    c->qpel_put[size][dxy](c->temp, ref[0] + x + y*stride, stride); //FIXME prototype (add h)
+                } else if (size == 0 && h == 8) {
+                    c->qpel_put[1][dxy](c->temp    , ref[0] + x + y*stride    , stride);
+                    c->qpel_put[1][dxy](c->temp + 8, ref[0] + x + y*stride + 8, stride);
+                } else
+                    av_assert2(0);
                 if(chroma){
                     int cx= hx/2;
                     int cy= hy/2;
@@ -314,6 +317,9 @@ int ff_init_me(MpegEncContext *s){
     }
 
     c->avctx= s->avctx;
+
+    if(s->codec_id == AV_CODEC_ID_H261)
+        c->avctx->me_sub_cmp = c->avctx->me_cmp;
 
     if(cache_size < 2*dia_size && !c->stride){
         av_log(s->avctx, AV_LOG_INFO, "ME_MAP size may be a little small for the selected diamond size\n");

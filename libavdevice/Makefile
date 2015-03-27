@@ -7,6 +7,7 @@ HEADERS = avdevice.h                                                    \
 
 OBJS    = alldevices.o                                                  \
           avdevice.o                                                    \
+          utils.o                                                       \
 
 # input/output devices
 OBJS-$(CONFIG_ALSA_INDEV)                += alsa-audio-common.o \
@@ -18,7 +19,7 @@ OBJS-$(CONFIG_BKTR_INDEV)                += bktr.o
 OBJS-$(CONFIG_CACA_OUTDEV)               += caca.o
 OBJS-$(CONFIG_DECKLINK_OUTDEV)           += decklink_enc.o decklink_enc_c.o decklink_common.o
 OBJS-$(CONFIG_DECKLINK_INDEV)            += decklink_dec.o decklink_dec_c.o decklink_common.o
-OBJS-$(CONFIG_DSHOW_INDEV)               += dshow.o dshow_enummediatypes.o \
+OBJS-$(CONFIG_DSHOW_INDEV)               += dshow_crossbar.o dshow.o dshow_enummediatypes.o \
                                             dshow_enumpins.o dshow_filter.o \
                                             dshow_pin.o dshow_common.o
 OBJS-$(CONFIG_DV1394_INDEV)              += dv1394.o
@@ -35,7 +36,7 @@ OBJS-$(CONFIG_OPENGL_OUTDEV)             += opengl_enc.o
 OBJS-$(CONFIG_OSS_INDEV)                 += oss_audio.o oss_audio_dec.o
 OBJS-$(CONFIG_OSS_OUTDEV)                += oss_audio.o oss_audio_enc.o
 OBJS-$(CONFIG_PULSE_INDEV)               += pulse_audio_dec.o \
-                                            pulse_audio_common.o
+                                            pulse_audio_common.o timefilter.o
 OBJS-$(CONFIG_PULSE_OUTDEV)              += pulse_audio_enc.o \
                                             pulse_audio_common.o
 OBJS-$(CONFIG_QTKIT_INDEV)               += qtkit.o

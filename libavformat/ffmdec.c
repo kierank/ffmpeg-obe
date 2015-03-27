@@ -24,6 +24,8 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/intfloat.h"
 #include "libavutil/opt.h"
+#include "libavutil/avassert.h"
+#include "libavutil/avstring.h"
 #include "avformat.h"
 #include "internal.h"
 #include "ffm.h"
@@ -80,6 +82,7 @@ static int ffm_read_data(AVFormatContext *s,
     FFMContext *ffm = s->priv_data;
     AVIOContext *pb = s->pb;
     int len, fill_size, size1, frame_offset, id;
+    int64_t last_pos = -1;
 
     size1 = size;
     while (size > 0) {
@@ -99,9 +102,11 @@ static int ffm_read_data(AVFormatContext *s,
                 avio_seek(pb, tell, SEEK_SET);
             }
             id = avio_rb16(pb); /* PACKET_ID */
-            if (id != PACKET_ID)
+            if (id != PACKET_ID) {
                 if (ffm_resync(s, id) < 0)
                     return -1;
+                last_pos = avio_tell(pb);
+            }
             fill_size = avio_rb16(pb);
             ffm->dts = avio_rb64(pb);
             frame_offset = avio_rb16(pb);
@@ -115,7 +120,9 @@ static int ffm_read_data(AVFormatContext *s,
                 if (!frame_offset) {
                     /* This packet has no frame headers in it */
                     if (avio_tell(pb) >= ffm->packet_size * 3LL) {
-                        avio_seek(pb, -ffm->packet_size * 2LL, SEEK_CUR);
+                        int64_t seekback = FFMIN(ffm->packet_size * 2LL, avio_tell(pb) - last_pos);
+                        seekback = FFMAX(seekback, 0);
+                        avio_seek(pb, -seekback, SEEK_CUR);
                         goto retry_read;
                     }
                     /* This is bad, we cannot find a valid frame header */
@@ -231,6 +238,27 @@ static int ffm_close(AVFormatContext *s)
     return 0;
 }
 
+static int ffm_append_recommended_configuration(AVStream *st, char **conf)
+{
+    int ret;
+    size_t newsize;
+    av_assert0(conf && st);
+    if (!*conf)
+        return 0;
+    if (!st->recommended_encoder_configuration) {
+        st->recommended_encoder_configuration = *conf;
+        *conf = 0;
+        return 0;
+    }
+    newsize = strlen(*conf) + strlen(st->recommended_encoder_configuration) + 2;
+    if ((ret = av_reallocp(&st->recommended_encoder_configuration, newsize)) < 0)
+        return ret;
+    av_strlcat(st->recommended_encoder_configuration, ",", newsize);
+    av_strlcat(st->recommended_encoder_configuration, *conf, newsize);
+    av_freep(conf);
+    return 0;
+}
+
 static int ffm2_read_header(AVFormatContext *s)
 {
     FFMContext *ffm = s->priv_data;
@@ -238,7 +266,7 @@ static int ffm2_read_header(AVFormatContext *s)
     AVIOContext *pb = s->pb;
     AVCodecContext *codec;
     int ret;
-    int f_main = 0, f_cprv, f_stvi, f_stau;
+    int f_main = 0, f_cprv = -1, f_stvi = -1, f_stau = -1;
     AVCodec *enc;
     char *buffer;
 
@@ -308,6 +336,12 @@ static int ffm2_read_header(AVFormatContext *s)
             }
             codec->time_base.num = avio_rb32(pb);
             codec->time_base.den = avio_rb32(pb);
+            if (codec->time_base.num <= 0 || codec->time_base.den <= 0) {
+                av_log(s, AV_LOG_ERROR, "Invalid time base %d/%d\n",
+                       codec->time_base.num, codec->time_base.den);
+                ret = AVERROR_INVALIDDATA;
+                goto fail;
+            }
             codec->width = avio_rb16(pb);
             codec->height = avio_rb16(pb);
             codec->gop_size = avio_rb16(pb);
@@ -367,12 +401,14 @@ static int ffm2_read_header(AVFormatContext *s)
             }
             enc = avcodec_find_encoder(codec->codec_id);
             if (enc && enc->priv_data_size && enc->priv_class) {
-                st->recommended_encoder_configuration = av_malloc(size + 1);
-                if (!st->recommended_encoder_configuration) {
+                buffer = av_malloc(size + 1);
+                if (!buffer) {
                     ret = AVERROR(ENOMEM);
                     goto fail;
                 }
-                avio_get_str(pb, size, st->recommended_encoder_configuration, size + 1);
+                avio_get_str(pb, size, buffer, size + 1);
+                if ((ret = ffm_append_recommended_configuration(st, &buffer)) < 0)
+                    goto fail;
             }
             break;
         case MKBETAG('S', '2', 'V', 'I'):
@@ -387,7 +423,8 @@ static int ffm2_read_header(AVFormatContext *s)
             }
             avio_get_str(pb, INT_MAX, buffer, size);
             av_set_options_string(codec, buffer, "=", ",");
-            av_freep(&buffer);
+            if ((ret = ffm_append_recommended_configuration(st, &buffer)) < 0)
+                goto fail;
             break;
         case MKBETAG('S', '2', 'A', 'U'):
             if (f_stau++) {
@@ -401,14 +438,14 @@ static int ffm2_read_header(AVFormatContext *s)
             }
             avio_get_str(pb, INT_MAX, buffer, size);
             av_set_options_string(codec, buffer, "=", ",");
-            av_freep(&buffer);
+            ffm_append_recommended_configuration(st, &buffer);
             break;
         }
         avio_seek(pb, next, SEEK_SET);
     }
 
     /* get until end of block reached */
-    while ((avio_tell(pb) % ffm->packet_size) != 0)
+    while ((avio_tell(pb) % ffm->packet_size) != 0 && !pb->eof_reached)
         avio_r8(pb);
 
     /* init packet demux */
@@ -477,6 +514,11 @@ static int ffm_read_header(AVFormatContext *s)
         case AVMEDIA_TYPE_VIDEO:
             codec->time_base.num = avio_rb32(pb);
             codec->time_base.den = avio_rb32(pb);
+            if (codec->time_base.num <= 0 || codec->time_base.den <= 0) {
+                av_log(s, AV_LOG_ERROR, "Invalid time base %d/%d\n",
+                       codec->time_base.num, codec->time_base.den);
+                goto fail;
+            }
             codec->width = avio_rb16(pb);
             codec->height = avio_rb16(pb);
             codec->gop_size = avio_rb16(pb);
@@ -535,7 +577,7 @@ static int ffm_read_header(AVFormatContext *s)
     }
 
     /* get until end of block reached */
-    while ((avio_tell(pb) % ffm->packet_size) != 0)
+    while ((avio_tell(pb) % ffm->packet_size) != 0 && !pb->eof_reached)
         avio_r8(pb);
 
     /* init packet demux */

@@ -38,7 +38,7 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/intreadwrite.h"
 
-typedef struct {
+typedef struct Fragment {
     char file[1024];
     char infofile[1024];
     int64_t start_time, duration;
@@ -46,7 +46,7 @@ typedef struct {
     int64_t start_pos, size;
 } Fragment;
 
-typedef struct {
+typedef struct OutputStream {
     AVFormatContext *ctx;
     int ctx_inited;
     char dirname[1024];
@@ -66,7 +66,7 @@ typedef struct {
     int audio_tag;
 } OutputStream;
 
-typedef struct {
+typedef struct SmoothStreamingContext {
     const AVClass *class;  /* Class for private options. */
     int window_size;
     int extra_window_size;
@@ -179,13 +179,13 @@ static void ism_free(AVFormatContext *s)
         if (os->ctx && os->ctx_inited)
             av_write_trailer(os->ctx);
         if (os->ctx && os->ctx->pb)
-            av_free(os->ctx->pb);
+            av_freep(&os->ctx->pb);
         if (os->ctx)
             avformat_free_context(os->ctx);
-        av_free(os->private_str);
+        av_freep(&os->private_str);
         for (j = 0; j < os->nb_fragments; j++)
-            av_free(os->fragments[j]);
-        av_free(os->fragments);
+            av_freep(&os->fragments[j]);
+        av_freep(&os->fragments);
     }
     av_freep(&c->streams);
 }
@@ -215,16 +215,14 @@ static int write_manifest(AVFormatContext *s, int final)
     SmoothStreamingContext *c = s->priv_data;
     AVIOContext *out;
     char filename[1024], temp_filename[1024];
-    const char *write_filename;
     int ret, i, video_chunks = 0, audio_chunks = 0, video_streams = 0, audio_streams = 0;
     int64_t duration = 0;
 
     snprintf(filename, sizeof(filename), "%s/Manifest", s->filename);
     snprintf(temp_filename, sizeof(temp_filename), "%s/Manifest.tmp", s->filename);
-    write_filename = USE_RENAME_REPLACE ? temp_filename : filename;
-    ret = avio_open2(&out, write_filename, AVIO_FLAG_WRITE, &s->interrupt_callback, NULL);
+    ret = avio_open2(&out, temp_filename, AVIO_FLAG_WRITE, &s->interrupt_callback, NULL);
     if (ret < 0) {
-        av_log(s, AV_LOG_ERROR, "Unable to open %s for writing\n", write_filename);
+        av_log(s, AV_LOG_ERROR, "Unable to open %s for writing\n", temp_filename);
         return ret;
     }
     avio_printf(out, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
@@ -285,7 +283,7 @@ static int write_manifest(AVFormatContext *s, int final)
     avio_printf(out, "</SmoothStreamingMedia>\n");
     avio_flush(out);
     avio_close(out);
-    return USE_RENAME_REPLACE ? ff_rename(temp_filename, filename, s) : 0;
+    return ff_rename(temp_filename, filename, s);
 }
 
 static int ism_write_header(AVFormatContext *s)
@@ -396,6 +394,7 @@ static int ism_write_header(AVFormatContext *s)
     if (!c->has_video && c->min_frag_duration <= 0) {
         av_log(s, AV_LOG_WARNING, "no video stream and no min frag duration set\n");
         ret = AVERROR(EINVAL);
+        goto fail;
     }
     ret = write_manifest(s, 0);
 
@@ -560,7 +559,7 @@ static int ism_flush(AVFormatContext *s, int final)
                 for (j = 0; j < remove; j++) {
                     unlink(os->fragments[j]->file);
                     unlink(os->fragments[j]->infofile);
-                    av_free(os->fragments[j]);
+                    av_freep(&os->fragments[j]);
                 }
                 os->nb_fragments -= remove;
                 memmove(os->fragments, os->fragments + remove, os->nb_fragments * sizeof(*os->fragments));

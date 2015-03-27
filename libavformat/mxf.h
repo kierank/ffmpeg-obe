@@ -46,6 +46,8 @@ enum MXFMetadataSetType {
     IndexTableSegment,
     EssenceContainerData,
     TypeBottom,// add metadata type before this
+    EssenceGroup,
+    TaggedValue,
 };
 
 enum MXFFrameLayout {
