@@ -172,6 +172,8 @@ static int copy_stream_props(AVStream *st, AVStream *source_st)
     st->avg_frame_rate      = source_st->avg_frame_rate;
     st->time_base           = source_st->time_base;
     st->sample_aspect_ratio = source_st->sample_aspect_ratio;
+
+    av_dict_copy(&st->metadata, source_st->metadata, 0);
     return 0;
 }
 
@@ -627,7 +629,7 @@ static const AVOption options[] = {
     { "safe", "enable safe mode",
       OFFSET(safe), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 1, DEC },
     { "auto_convert", "automatically convert bitstream format",
-      OFFSET(auto_convert), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, DEC },
+      OFFSET(auto_convert), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, DEC },
     { NULL }
 };
 

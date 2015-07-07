@@ -31,6 +31,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/bprint.h"
 #include "libavutil/channel_layout.h"
+#include "libavutil/display.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/pixfmt.h"
@@ -327,6 +328,28 @@ static int insert_trim(int64_t start_time, int64_t duration,
     }
 
     ret = avfilter_init_str(ctx, NULL);
+    if (ret < 0)
+        return ret;
+
+    ret = avfilter_link(*last_filter, *pad_idx, ctx, 0);
+    if (ret < 0)
+        return ret;
+
+    *last_filter = ctx;
+    *pad_idx     = 0;
+    return 0;
+}
+
+static int insert_filter(AVFilterContext **last_filter, int *pad_idx,
+                         const char *filter_name, const char *args)
+{
+    AVFilterGraph *graph = (*last_filter)->graph;
+    AVFilterContext *ctx;
+    int ret;
+
+    ret = avfilter_graph_create_filter(&ctx,
+                                       avfilter_get_by_name(filter_name),
+                                       filter_name, args, NULL, graph);
     if (ret < 0)
         return ret;
 
@@ -676,6 +699,27 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
         return ret;
     last_filter = ifilter->filter;
 
+    if (ist->autorotate) {
+        double theta = get_rotation(ist->st);
+
+        if (fabs(theta - 90) < 1.0) {
+            ret = insert_filter(&last_filter, &pad_idx, "transpose", "clock");
+        } else if (fabs(theta - 180) < 1.0) {
+            ret = insert_filter(&last_filter, &pad_idx, "hflip", NULL);
+            if (ret < 0)
+                return ret;
+            ret = insert_filter(&last_filter, &pad_idx, "vflip", NULL);
+        } else if (fabs(theta - 270) < 1.0) {
+            ret = insert_filter(&last_filter, &pad_idx, "transpose", "cclock");
+        } else if (fabs(theta) > 1.0) {
+            char rotate_buf[64];
+            snprintf(rotate_buf, sizeof(rotate_buf), "%f*PI/180", theta);
+            ret = insert_filter(&last_filter, &pad_idx, "rotate", rotate_buf);
+        }
+        if (ret < 0)
+            return ret;
+    }
+
     if (ist->framerate.num) {
         AVFilterContext *setpts;
 
@@ -903,8 +947,27 @@ int configure_filtergraph(FilterGraph *fg)
         return ret;
 
     if (simple && (!inputs || inputs->next || !outputs || outputs->next)) {
-        av_log(NULL, AV_LOG_ERROR, "Simple filtergraph '%s' does not have "
-               "exactly one input and output.\n", graph_desc);
+        const char *num_inputs;
+        const char *num_outputs;
+        if (!outputs) {
+            num_outputs = "0";
+        } else if (outputs->next) {
+            num_outputs = ">1";
+        } else {
+            num_outputs = "1";
+        }
+        if (!inputs) {
+            num_inputs = "0";
+        } else if (inputs->next) {
+            num_inputs = ">1";
+        } else {
+            num_inputs = "1";
+        }
+        av_log(NULL, AV_LOG_ERROR, "Simple filtergraph '%s' was expected "
+               "to have exactly 1 input and 1 output."
+               " However, it had %s input(s) and %s output(s)."
+               " Please adjust, or use a complex filtergraph (-filter_complex) instead.\n",
+               graph_desc, num_inputs, num_outputs);
         return AVERROR(EINVAL);
     }
 

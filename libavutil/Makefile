@@ -78,7 +78,6 @@ BUILT_HEADERS = avconfig.h                                              \
 
 OBJS = adler32.o                                                        \
        aes.o                                                            \
-       atomic.o                                                         \
        audio_fifo.o                                                     \
        avstring.o                                                       \
        base64.o                                                         \
@@ -126,6 +125,7 @@ OBJS = adler32.o                                                        \
        samplefmt.o                                                      \
        sha.o                                                            \
        sha512.o                                                         \
+       softfloat.o                                                      \
        stereo3d.o                                                       \
        threadmessage.o                                                  \
        time.o                                                           \
@@ -135,6 +135,8 @@ OBJS = adler32.o                                                        \
        utils.o                                                          \
        xga_font_data.o                                                  \
        xtea.o                                                           \
+
+OBJS-$(!HAVE_ATOMICS_NATIVE)            += atomic.o                     \
 
 OBJS-$(CONFIG_LZO)                      += lzo.o
 OBJS-$(CONFIG_OPENCL)                   += opencl.o opencl_internal.o

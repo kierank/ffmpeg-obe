@@ -31,10 +31,12 @@
 
 int ff_get_guid(AVIOContext *s, ff_asf_guid *g)
 {
+    int ret;
     av_assert0(sizeof(*g) == 16); //compiler will optimize this out
-    if (avio_read(s, *g, sizeof(*g)) < (int)sizeof(*g)) {
+    ret = avio_read(s, *g, sizeof(*g));
+    if (ret < (int)sizeof(*g)) {
         memset(*g, 0, sizeof(*g));
-        return AVERROR_INVALIDDATA;
+        return ret < 0 ? ret : AVERROR_INVALIDDATA;
     }
     return 0;
 }
@@ -85,8 +87,10 @@ int ff_get_wav_header(AVIOContext *pb, AVCodecContext *codec, int size, int big_
 {
     int id;
 
-    if (size < 14)
+    if (size < 14) {
         avpriv_request_sample(codec, "wav header size < 14");
+        return AVERROR_INVALIDDATA;
+    }
 
     codec->codec_type  = AVMEDIA_TYPE_AUDIO;
     if (!big_endian) {
