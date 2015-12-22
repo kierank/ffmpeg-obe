@@ -1,14 +1,24 @@
 1
 00:00:00,970 --> 00:00:02,540
+<<<<<<< HEAD
 - Test 1.
 - Test 2.
+=======
+<font face="Serif" size="18">- Test 1.
+- Test 2.</font>
+>>>>>>> d7c2b75681e5d8942af6b0c30abf6e79b474d819
 
 2
 00:00:03,050 --> 00:00:04,740
-Test 3.
+<font face="Serif" size="18">Test 3.</font>
 
 3
 00:00:05,850 --> 00:00:08,140
+<<<<<<< HEAD
 - Test 4.
 - Test 5.
+=======
+<font face="Serif" size="18">- Test 4.
+- Test 5.</font>
+>>>>>>> d7c2b75681e5d8942af6b0c30abf6e79b474d819
 

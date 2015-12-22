@@ -456,7 +456,7 @@ static av_cold int fic_decode_init(AVCodecContext *avctx)
 }
 
 static const AVOption options[] = {
-{ "skip_cursor", "skip the cursor", offsetof(FICContext, skip_cursor), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 1, AV_OPT_FLAG_DECODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM },
+{ "skip_cursor", "skip the cursor", offsetof(FICContext, skip_cursor), AV_OPT_TYPE_BOOL, {.i64 = 0 }, 0, 1, AV_OPT_FLAG_DECODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM },
 { NULL },
 };
 
@@ -476,6 +476,6 @@ AVCodec ff_fic_decoder = {
     .init           = fic_decode_init,
     .decode         = fic_decode_frame,
     .close          = fic_decode_close,
-    .capabilities   = CODEC_CAP_DR1 | CODEC_CAP_SLICE_THREADS,
+    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SLICE_THREADS,
     .priv_class     = &fic_decoder_class,
 };

@@ -299,7 +299,7 @@ static float wv_get_value_float(WavpackFrameContext *s, uint32_t *crc, int S)
         const int max_bits  = 1 + 23 + 8 + 1;
         const int left_bits = get_bits_left(&s->gb_extra_bits);
 
-        if (left_bits + 8 * FF_INPUT_BUFFER_PADDING_SIZE < max_bits)
+        if (left_bits + 8 * AV_INPUT_BUFFER_PADDING_SIZE < max_bits)
             return 0.0;
     }
 
@@ -597,12 +597,14 @@ static av_cold int wv_alloc_frame_context(WavpackContext *c)
     return 0;
 }
 
+#if HAVE_THREADS
 static int init_thread_copy(AVCodecContext *avctx)
 {
     WavpackContext *s = avctx->priv_data;
     s->avctx = avctx;
     return 0;
 }
+#endif
 
 static av_cold int wavpack_decode_init(AVCodecContext *avctx)
 {
@@ -1125,5 +1127,5 @@ AVCodec ff_wavpack_decoder = {
     .decode         = wavpack_decode_frame,
     .flush          = wavpack_decode_flush,
     .init_thread_copy = ONLY_IF_THREADS_ENABLED(init_thread_copy),
-    .capabilities   = CODEC_CAP_DR1 | CODEC_CAP_FRAME_THREADS,
+    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
 };

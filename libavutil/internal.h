@@ -238,8 +238,8 @@ void avpriv_request_sample(void *avc,
 #if HAVE_LIBC_MSVCRT
 #include <crtversion.h>
 #if defined(_VC_CRT_MAJOR_VERSION) && _VC_CRT_MAJOR_VERSION < 14
-#pragma comment(linker, "/include:"EXTERN_PREFIX"avpriv_strtod")
-#pragma comment(linker, "/include:"EXTERN_PREFIX"avpriv_snprintf")
+#pragma comment(linker, "/include:" EXTERN_PREFIX "avpriv_strtod")
+#pragma comment(linker, "/include:" EXTERN_PREFIX "avpriv_snprintf")
 #endif
 
 #define avpriv_open ff_open
@@ -250,9 +250,53 @@ void avpriv_request_sample(void *avc,
 #define SIZE_SPECIFIER "zu"
 #endif
 
+#ifdef DEBUG
+#   define ff_dlog(ctx, ...) av_log(ctx, AV_LOG_DEBUG, __VA_ARGS__)
+#else
+#   define ff_dlog(ctx, ...) do { if (0) av_log(ctx, AV_LOG_DEBUG, __VA_ARGS__); } while (0)
+#endif
+
+/**
+ * Clip and convert a double value into the long long amin-amax range.
+ * This function is needed because conversion of floating point to integers when
+ * it does not fit in the integer's representation does not necessarily saturate
+ * correctly (usually converted to a cvttsd2si on x86) which saturates numbers
+ * > INT64_MAX to INT64_MIN. The standard marks such conversions as undefined
+ * behavior, allowing this sort of mathematically bogus conversions. This provides
+ * a safe alternative that is slower obviously but assures safety and better
+ * mathematical behavior.
+ * @param a value to clip
+ * @param amin minimum value of the clip range
+ * @param amax maximum value of the clip range
+ * @return clipped value
+ */
+static av_always_inline av_const int64_t ff_rint64_clip(double a, int64_t amin, int64_t amax)
+{
+    int64_t res;
+#if defined(HAVE_AV_CONFIG_H) && defined(ASSERT_LEVEL) && ASSERT_LEVEL >= 2
+    if (amin > amax) abort();
+#endif
+    // INT64_MAX+1,INT64_MIN are exactly representable as IEEE doubles
+    // do range checks first
+    if (a >=  9223372036854775808.0)
+        return amax;
+    if (a <= -9223372036854775808.0)
+        return amin;
+
+    // safe to call llrint and clip accordingly
+    res = llrint(a);
+    if (res > amax)
+        return amax;
+    if (res < amin)
+        return amin;
+    return res;
+}
+
+
 /**
  * A wrapper for open() setting O_CLOEXEC.
  */
+av_warn_unused_result
 int avpriv_open(const char *filename, int flags, ...);
 
 int avpriv_set_systematic_pal2(uint32_t pal[256], enum AVPixelFormat pix_fmt);
@@ -270,10 +314,8 @@ static av_always_inline av_const int avpriv_mirror(int x, int w)
     return x;
 }
 
-#if FF_API_GET_CHANNEL_LAYOUT_COMPAT
-uint64_t ff_get_channel_layout(const char *name, int compat);
-#endif
-
 void ff_check_pixfmt_descriptors(void);
+
+extern const uint8_t ff_reverse[256];
 
 #endif /* AVUTIL_INTERNAL_H */

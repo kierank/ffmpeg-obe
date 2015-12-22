@@ -34,6 +34,7 @@
  * Caculate the SSIM between two input videos.
  */
 
+#include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
@@ -41,6 +42,7 @@
 #include "drawutils.h"
 #include "formats.h"
 #include "internal.h"
+#include "ssim.h"
 #include "video.h"
 
 typedef struct SSIMContext {
@@ -50,13 +52,15 @@ typedef struct SSIMContext {
     char *stats_file_str;
     int nb_components;
     uint64_t nb_frames;
-    double ssim[4];
+    double ssim[4], ssim_total;
     char comps[4];
-    int *coefs;
+    float coefs[4];
     uint8_t rgba_map[4];
     int planewidth[4];
     int planeheight[4];
     int *temp;
+    int is_rgb;
+    SSIMDSPContext dsp;
 } SSIMContext;
 
 #define OFFSET(x) offsetof(SSIMContext, x)
@@ -69,10 +73,6 @@ static const AVOption ssim_options[] = {
 };
 
 AVFILTER_DEFINE_CLASS(ssim);
-
-static int rgb_coefs[4]  = { 1, 1, 1, 3};
-static int yuv_coefs[4]  = { 4, 1, 1, 6};
-static int gray_coefs[4] = { 1, 0, 0, 1};
 
 static void set_meta(AVDictionary **metadata, const char *key, char comp, float d)
 {
@@ -87,13 +87,13 @@ static void set_meta(AVDictionary **metadata, const char *key, char comp, float 
     }
 }
 
-static void ssim_4x4x2_core(const uint8_t *main, int main_stride,
-                            const uint8_t *ref, int ref_stride,
-                            int sums[2][4])
+static void ssim_4x4xn(const uint8_t *main, ptrdiff_t main_stride,
+                       const uint8_t *ref, ptrdiff_t ref_stride,
+                       int (*sums)[4], int width)
 {
     int x, y, z;
 
-    for (z = 0; z < 2; z++) {
+    for (z = 0; z < width; z++) {
         uint32_t s1 = 0, s2 = 0, ss = 0, s12 = 0;
 
         for (y = 0; y < 4; y++) {
@@ -134,7 +134,7 @@ static float ssim_end1(int s1, int s2, int ss, int s12)
          / ((float)(fs1 * fs1 + fs2 * fs2 + ssim_c1) * (float)(vars + ssim_c2));
 }
 
-static float ssim_end4(int sum0[5][4], int sum1[5][4], int width)
+static float ssim_endn(const int (*sum0)[4], const int (*sum1)[4], int width)
 {
     float ssim = 0.0;
     int i;
@@ -147,12 +147,12 @@ static float ssim_end4(int sum0[5][4], int sum1[5][4], int width)
     return ssim;
 }
 
-static float ssim_plane(uint8_t *main, int main_stride,
+static float ssim_plane(SSIMDSPContext *dsp,
+                        uint8_t *main, int main_stride,
                         uint8_t *ref, int ref_stride,
                         int width, int height, void *temp)
 {
-    int z = 0;
-    int x, y;
+    int z = 0, y;
     float ssim = 0.0;
     int (*sum0)[4] = temp;
     int (*sum1)[4] = sum0 + (width >> 2) + 3;
@@ -163,14 +163,12 @@ static float ssim_plane(uint8_t *main, int main_stride,
     for (y = 1; y < height; y++) {
         for (; z <= y; z++) {
             FFSWAP(void*, sum0, sum1);
-            for (x = 0; x < width; x+=2)
-                ssim_4x4x2_core(&main[4 * (x + z * main_stride)], main_stride,
-                                &ref[4 * (x + z * ref_stride)], ref_stride,
-                                &sum0[x]);
+            dsp->ssim_4x4_line(&main[4 * z * main_stride], main_stride,
+                               &ref[4 * z * ref_stride], ref_stride,
+                               sum0, width);
         }
 
-        for (x = 0; x < width - 1; x += 4)
-            ssim += ssim_end4(sum0 + x, sum1 + x, FFMIN(4, width - x - 1));
+        ssim += dsp->ssim_end_line((const int (*)[4])sum0, (const int (*)[4])sum1, width - 1);
     }
 
     return ssim / ((height - 1) * (width - 1));
@@ -178,7 +176,7 @@ static float ssim_plane(uint8_t *main, int main_stride,
 
 static double ssim_db(double ssim, double weight)
 {
-    return 10 * (log(weight) / log(10) - log(weight - ssim) / log(10));
+    return 10 * log10(weight / (weight - ssim));
 }
 
 static AVFrame *do_ssim(AVFilterContext *ctx, AVFrame *main,
@@ -186,36 +184,37 @@ static AVFrame *do_ssim(AVFilterContext *ctx, AVFrame *main,
 {
     AVDictionary **metadata = avpriv_frame_get_metadatap(main);
     SSIMContext *s = ctx->priv;
-    float c[4], ssimv;
+    float c[4], ssimv = 0.0;
     int i;
 
     s->nb_frames++;
 
-    for (i = 0; i < s->nb_components; i++)
-        c[i] = ssim_plane(main->data[i], main->linesize[i],
+    for (i = 0; i < s->nb_components; i++) {
+        c[i] = ssim_plane(&s->dsp, main->data[i], main->linesize[i],
                           ref->data[i], ref->linesize[i],
                           s->planewidth[i], s->planeheight[i], s->temp);
-
-    ssimv = (c[0] * s->coefs[0] + c[1] * s->coefs[1] + c[2] * s->coefs[2]) / s->coefs[3];
-
-    for (i = 0; i < s->nb_components; i++)
-        set_meta(metadata, "lavfi.ssim.", s->comps[i], c[i]);
+        ssimv += s->coefs[i] * c[i];
+        s->ssim[i] += c[i];
+    }
+    for (i = 0; i < s->nb_components; i++) {
+        int cidx = s->is_rgb ? s->rgba_map[i] : i;
+        set_meta(metadata, "lavfi.ssim.", s->comps[i], c[cidx]);
+    }
+    s->ssim_total += ssimv;
 
     set_meta(metadata, "lavfi.ssim.All", 0, ssimv);
-    set_meta(metadata, "lavfi.ssim.dB", 0, ssim_db(c[0] * s->coefs[0] + c[1] * s->coefs[1] + c[2] * s->coefs[2], s->coefs[3]));
+    set_meta(metadata, "lavfi.ssim.dB", 0, ssim_db(ssimv, 1.0));
 
     if (s->stats_file) {
         fprintf(s->stats_file, "n:%"PRId64" ", s->nb_frames);
 
-        for (i = 0; i < s->nb_components; i++)
-            fprintf(s->stats_file, "%c:%f ", s->comps[i], c[i]);
+        for (i = 0; i < s->nb_components; i++) {
+            int cidx = s->is_rgb ? s->rgba_map[i] : i;
+            fprintf(s->stats_file, "%c:%f ", s->comps[i], c[cidx]);
+        }
 
-        fprintf(s->stats_file, "All:%f (%f)\n", ssimv, ssim_db(c[0] * s->coefs[0] + c[1] * s->coefs[1] + c[2] * s->coefs[2], s->coefs[3]));
+        fprintf(s->stats_file, "All:%f (%f)\n", ssimv, ssim_db(ssimv, 1.0));
     }
-
-    s->ssim[0] += c[0];
-    s->ssim[1] += c[1];
-    s->ssim[2] += c[2];
 
     return main;
 }
@@ -225,14 +224,18 @@ static av_cold int init(AVFilterContext *ctx)
     SSIMContext *s = ctx->priv;
 
     if (s->stats_file_str) {
-        s->stats_file = fopen(s->stats_file_str, "w");
-        if (!s->stats_file) {
-            int err = AVERROR(errno);
-            char buf[128];
-            av_strerror(err, buf, sizeof(buf));
-            av_log(ctx, AV_LOG_ERROR, "Could not open stats file %s: %s\n",
-                   s->stats_file_str, buf);
-            return err;
+        if (!strcmp(s->stats_file_str, "-")) {
+            s->stats_file = stdout;
+        } else {
+            s->stats_file = fopen(s->stats_file_str, "w");
+            if (!s->stats_file) {
+                int err = AVERROR(errno);
+                char buf[128];
+                av_strerror(err, buf, sizeof(buf));
+                av_log(ctx, AV_LOG_ERROR, "Could not open stats file %s: %s\n",
+                       s->stats_file_str, buf);
+                return err;
+            }
         }
     }
 
@@ -265,7 +268,7 @@ static int config_input_ref(AVFilterLink *inlink)
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     SSIMContext *s = ctx->priv;
-    int is_rgb;
+    int sum = 0, i;
 
     s->nb_components = desc->nb_components;
 
@@ -279,28 +282,29 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
-    is_rgb = ff_fill_rgba_map(s->rgba_map, inlink->format) >= 0;
-    s->comps[0] = is_rgb ? 'R' : 'Y';
-    s->comps[1] = is_rgb ? 'G' : 'U';
-    s->comps[2] = is_rgb ? 'B' : 'V';
+    s->is_rgb = ff_fill_rgba_map(s->rgba_map, inlink->format) >= 0;
+    s->comps[0] = s->is_rgb ? 'R' : 'Y';
+    s->comps[1] = s->is_rgb ? 'G' : 'U';
+    s->comps[2] = s->is_rgb ? 'B' : 'V';
     s->comps[3] = 'A';
-
-    if (is_rgb) {
-        s->coefs = rgb_coefs;
-    } else if (s->nb_components == 1) {
-        s->coefs = gray_coefs;
-    } else {
-        s->coefs = yuv_coefs;
-    }
 
     s->planeheight[1] = s->planeheight[2] = FF_CEIL_RSHIFT(inlink->h, desc->log2_chroma_h);
     s->planeheight[0] = s->planeheight[3] = inlink->h;
     s->planewidth[1]  = s->planewidth[2]  = FF_CEIL_RSHIFT(inlink->w, desc->log2_chroma_w);
     s->planewidth[0]  = s->planewidth[3]  = inlink->w;
+    for (i = 0; i < s->nb_components; i++)
+        sum += s->planeheight[i] * s->planewidth[i];
+    for (i = 0; i < s->nb_components; i++)
+        s->coefs[i] = (double) s->planeheight[i] * s->planewidth[i] / sum;
 
     s->temp = av_malloc((2 * inlink->w + 12) * sizeof(*s->temp));
     if (!s->temp)
         return AVERROR(ENOMEM);
+
+    s->dsp.ssim_4x4_line = ssim_4x4xn;
+    s->dsp.ssim_end_line = ssim_endn;
+    if (ARCH_X86)
+        ff_ssim_init_x86(&s->dsp);
 
     return 0;
 }
@@ -341,22 +345,21 @@ static av_cold void uninit(AVFilterContext *ctx)
     SSIMContext *s = ctx->priv;
 
     if (s->nb_frames > 0) {
-        if (s->nb_components == 3) {
-            av_log(ctx, AV_LOG_INFO, "SSIM %c:%f %c:%f %c:%f All:%f (%f)\n",
-               s->comps[0], s->ssim[0] / s->nb_frames,
-               s->comps[1], s->ssim[1] / s->nb_frames,
-               s->comps[2], s->ssim[2] / s->nb_frames,
-               (s->ssim[0] * 4 + s->ssim[1] + s->ssim[2]) / (s->nb_frames * 6),
-               ssim_db(s->ssim[0] * 4 + s->ssim[1] + s->ssim[2], s->nb_frames * 6));
-        } else if (s->nb_components == 1) {
-            av_log(ctx, AV_LOG_INFO, "SSIM All:%f (%f)\n",
-               s->ssim[0] / s->nb_frames, ssim_db(s->ssim[0], s->nb_frames));
+        char buf[256];
+        int i;
+        buf[0] = 0;
+        for (i = 0; i < s->nb_components; i++) {
+            int c = s->is_rgb ? s->rgba_map[i] : i;
+            av_strlcatf(buf, sizeof(buf), " %c:%f (%f)", s->comps[i], s->ssim[c] / s->nb_frames,
+                        ssim_db(s->ssim[c], s->nb_frames));
         }
+        av_log(ctx, AV_LOG_INFO, "SSIM%s All:%f (%f)\n", buf,
+               s->ssim_total / s->nb_frames, ssim_db(s->ssim_total, s->nb_frames));
     }
 
     ff_dualinput_uninit(&s->dinput);
 
-    if (s->stats_file)
+    if (s->stats_file && s->stats_file != stdout)
         fclose(s->stats_file);
 
     av_freep(&s->temp);

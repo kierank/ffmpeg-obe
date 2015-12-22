@@ -20,6 +20,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #include <sys/stat.h>
 #include "libavutil/avstring.h"
@@ -444,14 +445,17 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
     }
 
     res = av_new_packet(pkt, size[0] + size[1] + size[2]);
-    if (res < 0)
-        return res;
+    if (res < 0) {
+        goto fail;
+    }
     pkt->stream_index = 0;
     pkt->flags       |= AV_PKT_FLAG_KEY;
     if (s->ts_from_file) {
         struct stat img_stat;
-        if (stat(filename, &img_stat))
-            return AVERROR(EIO);
+        if (stat(filename, &img_stat)) {
+            res = AVERROR(EIO);
+            goto fail;
+        }
         pkt->pts = (int64_t)img_stat.st_mtime;
 #if HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
         if (s->ts_from_file == 2)
@@ -483,20 +487,31 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
     }
 
     if (ret[0] <= 0 || ret[1] < 0 || ret[2] < 0) {
-        av_free_packet(pkt);
+        av_packet_unref(pkt);
         if (ret[0] < 0) {
-            return ret[0];
+            res = ret[0];
         } else if (ret[1] < 0) {
-            return ret[1];
-        } else if (ret[2] < 0)
-            return ret[2];
-        return AVERROR_EOF;
+            res = ret[1];
+        } else if (ret[2] < 0) {
+            res = ret[2];
+        } else {
+            res = AVERROR_EOF;
+        }
+        goto fail;
     } else {
         s->img_count++;
         s->img_number++;
         s->pts++;
         return 0;
     }
+
+fail:
+    if (!s->is_pipe) {
+        for (i = 0; i < 3; i++) {
+            avio_closep(&f[i]);
+        }
+    }
+    return res;
 }
 
 static int img_read_close(struct AVFormatContext* s1)
@@ -534,7 +549,7 @@ static int img_read_seek(AVFormatContext *s, int stream_index, int64_t timestamp
 #define DEC AV_OPT_FLAG_DECODING_PARAM
 const AVOption ff_img_options[] = {
     { "framerate",    "set the video framerate",             OFFSET(framerate),    AV_OPT_TYPE_VIDEO_RATE, {.str = "25"}, 0, 0,   DEC },
-    { "loop",         "force loop over input file sequence", OFFSET(loop),         AV_OPT_TYPE_INT,    {.i64 = 0   }, 0, 1,       DEC },
+    { "loop",         "force loop over input file sequence", OFFSET(loop),         AV_OPT_TYPE_BOOL,   {.i64 = 0   }, 0, 1,       DEC },
 
     { "pattern_type", "set pattern type",                    OFFSET(pattern_type), AV_OPT_TYPE_INT,    {.i64=PT_GLOB_SEQUENCE}, 0,       INT_MAX, DEC, "pattern_type"},
     { "glob_sequence","select glob/sequence pattern type",   0, AV_OPT_TYPE_CONST,  {.i64=PT_GLOB_SEQUENCE}, INT_MIN, INT_MAX, DEC, "pattern_type" },
@@ -660,18 +675,14 @@ static int j2k_probe(AVProbeData *p)
 static int jpeg_probe(AVProbeData *p)
 {
     const uint8_t *b = p->buf;
-    int i, state = 0xD8, exif_size = 0;
+    int i, state = 0xD8;
 
     if (AV_RB16(b) != 0xFFD8 ||
         AV_RB32(b) == 0xFFD8FFF7)
     return 0;
 
     b += 2;
-    if (AV_RB16(b) == 0xFFE1 && AV_RB32(b + 4) == AV_RB32("Exif")) {
-        exif_size = AV_RB16(b + 2) + 2;
-        b += exif_size;
-    }
-    for (i = 0; i + exif_size < p->buf_size - 2; i++) {
+    for (i = 0; i < p->buf_size - 3; i++) {
         int c;
         if (b[i] != 0xFF)
             continue;
@@ -699,6 +710,24 @@ static int jpeg_probe(AVProbeData *p)
             if (state != 0xDA)
                 return 0;
             state = 0xD9;
+            break;
+        case 0xE0:
+        case 0xE1:
+        case 0xE2:
+        case 0xE3:
+        case 0xE4:
+        case 0xE5:
+        case 0xE6:
+        case 0xE7:
+        case 0xE8:
+        case 0xE9:
+        case 0xEA:
+        case 0xEB:
+        case 0xEC:
+        case 0xED:
+        case 0xEE:
+        case 0xEF:
+            i += AV_RB16(&b[i + 2]) + 1;
             break;
         default:
             if (  (c >= 0x02 && c <= 0xBF)

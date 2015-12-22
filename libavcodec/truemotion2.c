@@ -303,8 +303,8 @@ static int tm2_read_stream(TM2Context *ctx, const uint8_t *buf, int stream_id, i
     if (len == 0)
         return 4;
 
-    if (len >= INT_MAX/4-1 || len < 0 || skip > buf_size) {
-        av_log(ctx->avctx, AV_LOG_ERROR, "invalid stream size\n");
+    if (len >= INT_MAX / 4 - 1 || len < 0 || skip > buf_size) {
+        av_log(ctx->avctx, AV_LOG_ERROR, "Error, invalid stream size.\n");
         return AVERROR_INVALIDDATA;
     }
 
@@ -1023,5 +1023,5 @@ AVCodec ff_truemotion2_decoder = {
     .init           = decode_init,
     .close          = decode_end,
     .decode         = decode_frame,
-    .capabilities   = CODEC_CAP_DR1,
+    .capabilities   = AV_CODEC_CAP_DR1,
 };

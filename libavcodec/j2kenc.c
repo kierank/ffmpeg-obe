@@ -319,10 +319,9 @@ static int put_qcd(Jpeg2000EncoderContext *s, int compno)
 
 static int put_com(Jpeg2000EncoderContext *s, int compno)
 {
-    int i;
     int size = 4 + strlen(LIBAVCODEC_IDENT);
 
-    if (s->avctx->flags & CODEC_FLAG_BITEXACT)
+    if (s->avctx->flags & AV_CODEC_FLAG_BITEXACT)
         return 0;
 
     if (s->buf_end - s->buf < size + 2)
@@ -956,7 +955,7 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     Jpeg2000EncoderContext *s = avctx->priv_data;
     uint8_t *chunkstart, *jp2cstart, *jp2hstart;
 
-    if ((ret = ff_alloc_packet2(avctx, pkt, avctx->width*avctx->height*9 + FF_MIN_BUFFER_SIZE)) < 0)
+    if ((ret = ff_alloc_packet2(avctx, pkt, avctx->width*avctx->height*9 + AV_INPUT_BUFFER_MIN_SIZE, 0)) < 0)
         return ret;
 
     // init:
@@ -1160,7 +1159,6 @@ AVCodec ff_jpeg2000_encoder = {
     .init           = j2kenc_init,
     .encode2        = encode_frame,
     .close          = j2kenc_destroy,
-    .capabilities   = CODEC_CAP_EXPERIMENTAL,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_RGB24, AV_PIX_FMT_YUV444P, AV_PIX_FMT_GRAY8,
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,

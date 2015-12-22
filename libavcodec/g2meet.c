@@ -294,10 +294,10 @@ static int jpg_decode_data(JPGContext *c, int width, int height,
     const int ridx = swapuv ? 2 : 0;
 
     if ((ret = av_reallocp(&c->buf,
-                           src_size + FF_INPUT_BUFFER_PADDING_SIZE)) < 0)
+                           src_size + AV_INPUT_BUFFER_PADDING_SIZE)) < 0)
         return ret;
     jpg_unescape(src, src_size, c->buf, &unesc_size);
-    memset(c->buf + unesc_size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
+    memset(c->buf + unesc_size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
     if((ret = init_get_bits8(&gb, c->buf, unesc_size)) < 0)
         return ret;
 
@@ -553,6 +553,11 @@ static uint32_t epic_decode_pixel_pred(ePICContext *dc, int x, int y,
 
         delta = ff_els_decode_unsigned(&dc->els_ctx, &dc->unsigned_rung);
         B     = ((pred >> B_shift) & 0xFF) - TOSIGNED(delta);
+    }
+
+    if (R<0 || G<0 || B<0) {
+        av_log(NULL, AV_LOG_ERROR, "RGB %d %d %d is out of range\n", R, G, B);
+        return 0;
     }
 
     return (R << R_shift) | (G << G_shift) | (B << B_shift);
@@ -1171,15 +1176,16 @@ static int g2m_init_buffers(G2MContext *c)
         c->tile_stride     = FFALIGN(c->tile_width, 16) * 3;
         c->epic_buf_stride = FFALIGN(c->tile_width * 4, 16);
         aligned_height     = FFALIGN(c->tile_height,    16);
-        av_free(c->synth_tile);
-        av_free(c->jpeg_tile);
-        av_free(c->kempf_buf);
-        av_free(c->kempf_flags);
-        av_free(c->epic_buf_base);
+        av_freep(&c->synth_tile);
+        av_freep(&c->jpeg_tile);
+        av_freep(&c->kempf_buf);
+        av_freep(&c->kempf_flags);
+        av_freep(&c->epic_buf_base);
+        c->epic_buf    = NULL;
         c->synth_tile  = av_mallocz(c->tile_stride      * aligned_height);
         c->jpeg_tile   = av_mallocz(c->tile_stride      * aligned_height);
         c->kempf_buf   = av_mallocz((c->tile_width + 1) * aligned_height +
-                                    FF_INPUT_BUFFER_PADDING_SIZE);
+                                    AV_INPUT_BUFFER_PADDING_SIZE);
         c->kempf_flags = av_mallocz(c->tile_width       * aligned_height);
         if (!c->synth_tile || !c->jpeg_tile ||
             !c->kempf_buf || !c->kempf_flags)
@@ -1417,8 +1423,7 @@ static int g2m_decode_frame(AVCodecContext *avctx, void *data,
             }
             c->width  = bytestream2_get_be32(&bc);
             c->height = bytestream2_get_be32(&bc);
-            if (c->width  < 16 || c->width  > c->orig_width ||
-                c->height < 16 || c->height > c->orig_height) {
+            if (c->width < 16 || c->height < 16) {
                 av_log(avctx, AV_LOG_ERROR,
                        "Invalid frame dimensions %dx%d\n",
                        c->width, c->height);
@@ -1442,7 +1447,7 @@ static int g2m_decode_frame(AVCodecContext *avctx, void *data,
             c->tile_height = bytestream2_get_be32(&bc);
             if (c->tile_width <= 0 || c->tile_height <= 0 ||
                 ((c->tile_width | c->tile_height) & 0xF) ||
-                c->tile_width * 4LL * c->tile_height >= INT_MAX
+                c->tile_width * (uint64_t)c->tile_height >= INT_MAX / 4
             ) {
                 av_log(avctx, AV_LOG_ERROR,
                        "Invalid tile dimensions %dx%d\n",
@@ -1574,6 +1579,8 @@ header_fail:
     c->height  = 0;
     c->tiles_x =
     c->tiles_y = 0;
+    c->tile_width =
+    c->tile_height = 0;
     return ret;
 }
 
@@ -1604,6 +1611,7 @@ static av_cold int g2m_decode_end(AVCodecContext *avctx)
     jpg_free_context(&c->jc);
 
     av_freep(&c->epic_buf_base);
+    c->epic_buf = NULL;
     av_freep(&c->kempf_buf);
     av_freep(&c->kempf_flags);
     av_freep(&c->synth_tile);
@@ -1623,6 +1631,6 @@ AVCodec ff_g2m_decoder = {
     .init           = g2m_decode_init,
     .close          = g2m_decode_end,
     .decode         = g2m_decode_frame,
-    .capabilities   = CODEC_CAP_DR1,
+    .capabilities   = AV_CODEC_CAP_DR1,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

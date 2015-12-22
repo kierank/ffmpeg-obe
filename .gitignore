@@ -1,5 +1,6 @@
 *.a
 *.o
+*.o.*
 *.d
 *.def
 *.dll
@@ -20,6 +21,8 @@
 *-example
 *-test
 *_g
+\#*
+.\#*
 /.config
 /.version
 /ffmpeg
@@ -37,7 +40,7 @@
 /doc/avoptions_codec.texi
 /doc/avoptions_format.texi
 /doc/doxy/html/
-/doc/examples/avio_list_dir
+/doc/examples/avio_dir_cmd
 /doc/examples/avio_reading
 /doc/examples/decoding_encoding
 /doc/examples/demuxing_decoding
@@ -63,6 +66,7 @@
 /libavutil/ffversion.h
 /tests/audiogen
 /tests/base64
+/tests/checkasm/checkasm
 /tests/data/
 /tests/pixfmts.mak
 /tests/rotozoom
