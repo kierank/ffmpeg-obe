@@ -107,6 +107,15 @@ static void log_callback_report(void *ptr, int level, const char *fmt, va_list v
     }
 }
 
+void init_dynload(void)
+{
+#ifdef _WIN32
+    /* Calling SetDllDirectory with the empty string (but not NULL) removes the
+     * current working directory from the DLL search path as a security pre-caution. */
+    SetDllDirectory("");
+#endif
+}
+
 static void (*program_exit)(int ret);
 
 void register_exit(void (*cb)(int ret))
@@ -1625,7 +1634,7 @@ int show_filters(void *optctx, const char *opt, const char *arg)
                                   ( i && (filter->flags & AVFILTER_FLAG_DYNAMIC_OUTPUTS))) ? 'N' : '|';
         }
         *descr_cur = 0;
-        printf(" %c%c%c %-16s %-10s %s\n",
+        printf(" %c%c%c %-17s %-10s %s\n",
                filter->flags & AVFILTER_FLAG_SUPPORT_TIMELINE ? 'T' : '.',
                filter->flags & AVFILTER_FLAG_SLICE_THREADS    ? 'S' : '.',
                filter->process_command                        ? 'C' : '.',

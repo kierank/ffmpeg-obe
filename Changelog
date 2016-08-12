@@ -2,7 +2,70 @@ Entries are sorted chronologically from oldest to youngest within each release,
 releases are sorted from youngest to oldest.
 
 version <next>:
-- Common Encryption (CENC) MP4 encoding support
+- libopenmpt demuxer
+- tee protocol
+- Changed metadata print option to accept general urls
+- Alias muxer for Ogg Video (.ogv)
+- VP8 in Ogg muxing
+- curves filter doesn't automatically insert points at x=0 and x=1 anymore
+- 16-bit support in curves filter
+- 16-bit support in selectivecolor filter
+- OpenH264 decoder wrapper
+- MediaCodec hwaccel
+- True Audio (TTA) muxer
+- crystalizer audio filter
+- acrusher audio filter
+
+
+version 3.1:
+- DXVA2-accelerated HEVC Main10 decoding
+- fieldhint filter
+- loop video filter and aloop audio filter
+- Bob Weaver deinterlacing filter
+- firequalizer filter
+- datascope filter
+- bench and abench filters
+- ciescope filter
+- protocol blacklisting API
+- MediaCodec H264 decoding
+- VC-2 HQ RTP payload format (draft v1) depacketizer and packetizer
+- VP9 RTP payload format (draft v2) packetizer
+- AudioToolbox audio decoders
+- AudioToolbox audio encoders
+- coreimage filter (GPU based image filtering on OSX)
+- libdcadec removed
+- bitstream filter for extracting DTS core
+- ADPCM IMA DAT4 decoder
+- musx demuxer
+- aix demuxer
+- remap filter
+- hash and framehash muxers
+- colorspace filter
+- hdcd filter
+- readvitc filter
+- VAAPI-accelerated format conversion and scaling
+- libnpp/CUDA-accelerated format conversion and scaling
+- Duck TrueMotion 2.0 Real Time decoder
+- Wideband Single-bit Data (WSD) demuxer
+- VAAPI-accelerated H.264/HEVC/MJPEG encoding
+- DTS Express (LBR) decoder
+- Generic OpenMAX IL encoder with support for Raspberry Pi
+- IFF ANIM demuxer & decoder
+- Direct Stream Transfer (DST) decoder
+- loudnorm filter
+- MTAF demuxer and decoder
+- MagicYUV decoder
+- OpenExr improvements (tile data and B44/B44A support)
+- BitJazz SheerVideo decoder
+- CUDA CUVID H264/HEVC decoder
+- 10-bit depth support in native utvideo decoder
+- libutvideo wrapper removed
+- YUY2 Lossless Codec decoder
+- VideoToolbox H.264 encoder
+
+
+version 3.0:
+- Common Encryption (CENC) MP4 encoding and decoding support
 - DXV decoding
 - extrastereo filter
 - ocr filter
@@ -47,6 +110,28 @@ version <next>:
 - DXVA2-accelerated VP9 decoding
 - SOFAlizer: virtual binaural acoustics filter
 - VAAPI VP9 hwaccel
+- audio high-order multiband parametric equalizer
+- automatic bitstream filtering
+- showspectrumpic filter
+- libstagefright support removed
+- spectrumsynth filter
+- ahistogram filter
+- only seek with the right mouse button in ffplay
+- toggle full screen when double-clicking with the left mouse button in ffplay
+- afftfilt filter
+- convolution filter
+- libquvi support removed
+- support for dvaudio in wav and avi
+- libaacplus and libvo-aacenc support removed
+- Cineform HD decoder
+- new DCA decoder with full support for DTS-HD extensions
+- significant performance improvements in Windows Television (WTV) demuxer
+- nnedi deinterlacer
+- streamselect video and astreamselect audio filter
+- swaprect filter
+- metadata video and ametadata audio filter
+- SMPTE VC-2 HQ profile support for the Dirac decoder
+- SMPTE VC-2 native encoder supporting the HQ profile
 
 
 version 2.8:
@@ -849,8 +934,8 @@ version 0.8:
 - showinfo filter added
 - SMPTE 302M AES3 audio decoder
 - Apple Core Audio Format muxer
-- 9bit and 10bit per sample support in the H.264 decoder
-- 9bit and 10bit FFV1 encoding / decoding
+- 9 bits and 10 bits per sample support in the H.264 decoder
+- 9 bits and 10 bits FFV1 encoding / decoding
 - split filter added
 - select filter added
 - sdl output device added
@@ -1143,7 +1228,7 @@ version 0.4.9-pre1:
 - rate distorted optimal lambda->qp support
 - AAC encoding with libfaac
 - Sunplus JPEG codec (SP5X) support
-- use Lagrange multipler instead of QP for ratecontrol
+- use Lagrange multiplier instead of QP for ratecontrol
 - Theora/VP3 decoding support
 - XA and ADX ADPCM codecs
 - export MPEG-2 active display area / pan scan

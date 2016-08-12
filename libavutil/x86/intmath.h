@@ -22,6 +22,7 @@
 #define AVUTIL_X86_INTMATH_H
 
 #include <stdint.h>
+#include <stdlib.h>
 #if HAVE_FAST_CLZ
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -46,6 +47,7 @@ static av_always_inline av_const int ff_log2_x86(unsigned int v)
 #   endif
 #   define ff_log2_16bit av_log2
 
+#if defined(__INTEL_COMPILER) || (defined(_MSC_VER) && (_MSC_VER >= 1700))
 #   define ff_ctz(v) _tzcnt_u32(v)
 
 #   if ARCH_X86_64
@@ -57,6 +59,7 @@ static av_always_inline av_const int ff_ctzll_x86(long long v)
     return ((uint32_t)v == 0) ? _tzcnt_u32((uint32_t)(v >> 32)) + 32 : _tzcnt_u32((uint32_t)v);
 }
 #   endif
+#endif /* _MSC_VER */
 
 #endif /* __INTEL_COMPILER */
 
@@ -97,6 +100,38 @@ static av_always_inline av_const unsigned av_mod_uintp2_bmi2(unsigned a, unsigne
 #endif /* AV_GCC_VERSION_AT_LEAST */
 
 #endif /* __BMI2__ */
+
+#if defined(__SSE2__) && !defined(__INTEL_COMPILER)
+
+#define av_clipd av_clipd_sse2
+static av_always_inline av_const double av_clipd_sse2(double a, double amin, double amax)
+{
+#if defined(ASSERT_LEVEL) && ASSERT_LEVEL >= 2
+    if (amin > amax) abort();
+#endif
+    __asm__ ("minsd %2, %0 \n\t"
+             "maxsd %1, %0 \n\t"
+             : "+&x"(a) : "xm"(amin), "xm"(amax));
+    return a;
+}
+
+#endif /* __SSE2__ */
+
+#if defined(__SSE__) && !defined(__INTEL_COMPILER)
+
+#define av_clipf av_clipf_sse
+static av_always_inline av_const float av_clipf_sse(float a, float amin, float amax)
+{
+#if defined(ASSERT_LEVEL) && ASSERT_LEVEL >= 2
+    if (amin > amax) abort();
+#endif
+    __asm__ ("minss %2, %0 \n\t"
+             "maxss %1, %0 \n\t"
+             : "+&x"(a) : "xm"(amin), "xm"(amax));
+    return a;
+}
+
+#endif /* __SSE__ */
 
 #endif /* __GNUC__ */
 

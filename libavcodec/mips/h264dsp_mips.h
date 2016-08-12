@@ -19,10 +19,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef H264_DSP_MIPS_H
-#define H264_DSP_MIPS_H
+#ifndef AVCODEC_MIPS_H264DSP_MIPS_H
+#define AVCODEC_MIPS_H264DSP_MIPS_H
 
-#include "libavcodec/h264.h"
+#include "libavcodec/h264dec.h"
 #include "constants.h"
 
 void ff_h264_h_lpf_luma_inter_msa(uint8_t *src, int stride,
@@ -574,4 +574,4 @@ void ff_avg_h264_qpel4_mc23_mmi(uint8_t *dst, const uint8_t *src,
 void ff_avg_h264_qpel4_mc33_mmi(uint8_t *dst, const uint8_t *src,
         ptrdiff_t dst_stride);
 
-#endif  // #ifndef H264_DSP_MIPS_H
+#endif  // #ifndef AVCODEC_MIPS_H264DSP_MIPS_H

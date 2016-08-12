@@ -65,6 +65,8 @@ enum HWAccelID {
     HWACCEL_VDA,
     HWACCEL_VIDEOTOOLBOX,
     HWACCEL_QSV,
+    HWACCEL_VAAPI,
+    HWACCEL_CUVID,
 };
 
 typedef struct HWAccel {
@@ -126,6 +128,8 @@ typedef struct OptionsContext {
     int        nb_hwaccels;
     SpecifierOpt *hwaccel_devices;
     int        nb_hwaccel_devices;
+    SpecifierOpt *hwaccel_output_formats;
+    int        nb_hwaccel_output_formats;
     SpecifierOpt *autorotate;
     int        nb_autorotate;
 
@@ -325,6 +329,7 @@ typedef struct InputStream {
     /* hwaccel options */
     enum HWAccelID hwaccel_id;
     char  *hwaccel_device;
+    enum AVPixelFormat hwaccel_output_format;
 
     /* hwaccel context */
     enum HWAccelID active_hwaccel_id;
@@ -334,6 +339,7 @@ typedef struct InputStream {
     int  (*hwaccel_retrieve_data)(AVCodecContext *s, AVFrame *frame);
     enum AVPixelFormat hwaccel_pix_fmt;
     enum AVPixelFormat hwaccel_retrieved_pix_fmt;
+    AVBufferRef *hw_frames_ctx;
 
     /* stats */
     // combined size of all the packets read
@@ -454,7 +460,6 @@ typedef struct OutputStream {
     AVDictionary *sws_dict;
     AVDictionary *swr_opts;
     AVDictionary *resample_opts;
-    AVDictionary *bsf_args;
     char *apad;
     OSTFinished finished;        /* no more packets should be written for this stream */
     int unavailable;                     /* true if the steram is unavailable (possibly temporarily) */
@@ -539,13 +544,14 @@ extern int stdin_interaction;
 extern int frame_bits_per_raw_sample;
 extern AVIOContext *progress_avio;
 extern float max_error_rate;
-extern int vdpau_api_ver;
 extern char *videotoolbox_pixfmt;
 
 extern const AVIOInterruptCB int_cb;
 
 extern const OptionDef options[];
 extern const HWAccel hwaccels[];
+extern int hwaccel_lax_profile_check;
+extern AVBufferRef *hw_device_ctx;
 
 
 void term_init(void);
@@ -567,7 +573,8 @@ void choose_sample_fmt(AVStream *st, AVCodec *codec);
 int configure_filtergraph(FilterGraph *fg);
 int configure_output_filter(FilterGraph *fg, OutputFilter *ofilter, AVFilterInOut *out);
 int ist_in_filtergraph(FilterGraph *fg, InputStream *ist);
-FilterGraph *init_simple_filtergraph(InputStream *ist, OutputStream *ost);
+int filtergraph_is_simple(FilterGraph *fg);
+int init_simple_filtergraph(InputStream *ist, OutputStream *ost);
 int init_complex_filtergraph(FilterGraph *fg);
 
 int ffmpeg_parse_options(int argc, char **argv);
@@ -578,5 +585,9 @@ int vda_init(AVCodecContext *s);
 int videotoolbox_init(AVCodecContext *s);
 int qsv_init(AVCodecContext *s);
 int qsv_transcode_init(OutputStream *ost);
+int vaapi_decode_init(AVCodecContext *avctx);
+int vaapi_device_init(const char *device);
+int cuvid_init(AVCodecContext *s);
+int cuvid_transcode_init(OutputStream *ost);
 
 #endif /* FFMPEG_H */

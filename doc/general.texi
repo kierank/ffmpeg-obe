@@ -53,14 +53,6 @@ instructions for installing the libraries.
 Then pass @code{--enable-libopencore-amrnb} and/or
 @code{--enable-libopencore-amrwb} to configure to enable them.
 
-@subsection VisualOn AAC encoder library
-
-FFmpeg can make use of the VisualOn AACenc library for AAC encoding.
-
-Go to @url{http://sourceforge.net/projects/opencore-amr/} and follow the
-instructions for installing the library.
-Then pass @code{--enable-libvo-aacenc} to configure to enable it.
-
 @subsection VisualOn AMR-WB encoder library
 
 FFmpeg can make use of the VisualOn AMR-WBenc library for AMR-WB encoding.
@@ -111,11 +103,18 @@ enable it.
 
 @section OpenH264
 
-FFmpeg can make use of the OpenH264 library for H.264 encoding.
+FFmpeg can make use of the OpenH264 library for H.264 encoding and decoding.
 
 Go to @url{http://www.openh264.org/} and follow the instructions for
 installing the library. Then pass @code{--enable-libopenh264} to configure to
 enable it.
+
+For decoding, this library is much more limited than the built-in decoder
+in libavcodec; currently, this library lacks support for decoding B-frames
+and some other main/high profile features. (It currently only supports
+constrained baseline profile and CABAC.) Using it is mostly useful for
+testing and for taking advantage of Cisco's patent portfolio license
+(@url{http://www.openh264.org/BINARY_LICENSE.txt}).
 
 @section x264
 
@@ -172,12 +171,6 @@ teletext pages and DVB teletext subtitles.
 Go to @url{http://sourceforge.net/projects/zapping/} and follow the instructions for
 installing the library. Then pass @code{--enable-libzvbi} to configure to
 enable it.
-
-@float NOTE
-libzvbi is licensed under the GNU General Public License Version 2 or later
-(see @url{http://www.gnu.org/licenses/old-licenses/gpl-2.0.html} for details),
-you must upgrade FFmpeg's license to GPL in order to use it.
-@end float
 
 @section AviSynth
 
@@ -290,6 +283,7 @@ library:
 @item CD+G                      @tab   @tab X
     @tab Video format used by CD+G karaoke disks
 @item Phantom Cine              @tab   @tab X
+@item Cineform HD               @tab   @tab X
 @item Commodore CDXL            @tab   @tab X
     @tab Amiga CD video format
 @item Core Audio Format         @tab X @tab X
@@ -515,7 +509,7 @@ library:
     @tab Used on the Nintendo GameCube.
 @item Tiertex Limited SEQ       @tab   @tab X
     @tab Tiertex .seq files used in the DOS CD-ROM version of the game Flashback.
-@item True Audio                @tab   @tab X
+@item True Audio                @tab X @tab X
 @item VAG                       @tab   @tab X
     @tab Audio format used in many Sony PS2 games.
 @item VC-1 test bitstream       @tab X @tab X
@@ -533,6 +527,7 @@ library:
     @tab Multimedia format used in Westwood Studios games.
 @item Westwood Studios VQA      @tab   @tab X
     @tab Multimedia format used in Westwood Studios games.
+@item Wideband Single-bit Data (WSD) @tab   @tab X
 @item WVE                       @tab   @tab X
 @item XMV                       @tab   @tab X
     @tab Microsoft video container used in Xbox games.
@@ -656,6 +651,7 @@ following image formats are supported:
 @item Bethesda VID video     @tab     @tab  X
     @tab Used in some games from Bethesda Softworks.
 @item Bink Video             @tab     @tab  X
+@item BitJazz SheerVideo     @tab     @tab  X
 @item Bitmap Brothers JV video  @tab   @tab X
 @item y41p Brooktree uncompressed 4:1:1 12-bit     @tab  X  @tab  X
 @item Brute Force & Ignorance   @tab   @tab X
@@ -690,6 +686,8 @@ following image formats are supported:
     @tab fourcc: DUCK
 @item Duck TrueMotion 2.0    @tab     @tab  X
     @tab fourcc: TM20
+@item Duck TrueMotion 2.0 RT @tab     @tab  X
+    @tab fourcc: TR20
 @item DV (Digital Video)     @tab  X  @tab  X
 @item Dxtory capture format  @tab     @tab  X
 @item Feeble Files/ScummVM DXA  @tab     @tab  X
@@ -756,6 +754,7 @@ following image formats are supported:
 @item LucasArts SANM/Smush   @tab     @tab  X
     @tab Used in LucasArts games / SMUSH animations.
 @item lossless MJPEG         @tab  X  @tab  X
+@item MagicYUV Video         @tab     @tab  X
 @item Microsoft ATC Screen   @tab     @tab  X
     @tab Also known as Microsoft Screen 3.
 @item Microsoft Expression Encoder Screen  @tab     @tab  X
@@ -887,10 +886,10 @@ following image formats are supported:
 @item Name @tab Encoding @tab Decoding @tab Comments
 @item 8SVX exponential       @tab     @tab  X
 @item 8SVX fibonacci         @tab     @tab  X
+@item AAC                    @tab EX  @tab  X
+    @tab encoding supported through internal encoder and external libraries libfaac and libfdk-aac
 @item AAC+                   @tab  E  @tab  IX
-    @tab encoding supported through external library libaacplus
-@item AAC                    @tab  E  @tab  X
-    @tab encoding supported through external library libfaac and libvo-aacenc
+    @tab encoding supported through external library libfdk-aac
 @item AC-3                   @tab IX  @tab  IX
 @item ADPCM 4X Movie         @tab     @tab  X
 @item APDCM Yamaha AICA      @tab     @tab  X
@@ -963,7 +962,7 @@ following image formats are supported:
 @item COOK                   @tab     @tab  X
     @tab All versions except 5.1 are supported.
 @item DCA (DTS Coherent Acoustics)  @tab  X  @tab  X
-    @tab supported extensions: XCh, XLL (partially)
+    @tab supported extensions: XCh, XXCH, X96, XBR, XLL, LBR (partially)
 @item DPCM id RoQ            @tab  X  @tab  X
     @tab Used in Quake III, Jedi Knight 2 and other computer games.
 @item DPCM Interplay         @tab     @tab  X
@@ -980,6 +979,7 @@ following image formats are supported:
 @item DSD (Direct Stream Digitial), least significant bit first, planar  @tab  @tab  X
 @item DSD (Direct Stream Digitial), most significant bit first, planar   @tab  @tab  X
 @item DSP Group TrueSpeech   @tab     @tab  X
+@item DST (Direct Stream Transfer) @tab  @tab  X
 @item DV audio               @tab     @tab  X
 @item Enhanced AC-3          @tab  X  @tab  X
 @item EVRC (Enhanced Variable Rate Codec) @tab     @tab  X

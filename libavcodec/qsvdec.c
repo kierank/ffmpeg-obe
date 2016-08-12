@@ -416,7 +416,9 @@ static int do_qsv_decode(AVCodecContext *avctx, QSVContext *q,
         av_fifo_generic_read(q->async_fifo, &sync,      sizeof(sync),      NULL);
         out_frame->queued = 0;
 
-        MFXVideoCORE_SyncOperation(q->session, sync, 60000);
+        do {
+            ret = MFXVideoCORE_SyncOperation(q->session, sync, 1000);
+        } while (ret == MFX_WRN_IN_EXECUTION);
 
         src_frame = out_frame->frame;
 
@@ -553,16 +555,18 @@ void ff_qsv_decode_reset(AVCodecContext *avctx, QSVContext *q)
     }
 
     /* Reset output surfaces */
-    av_fifo_reset(q->async_fifo);
+    if (q->async_fifo)
+        av_fifo_reset(q->async_fifo);
 
     /* Reset input packets fifo */
-    while (av_fifo_size(q->pkt_fifo)) {
+    while (q->pkt_fifo && av_fifo_size(q->pkt_fifo)) {
         av_fifo_generic_read(q->pkt_fifo, &pkt, sizeof(pkt), NULL);
         av_packet_unref(&pkt);
     }
 
     /* Reset input bitstream fifo */
-    av_fifo_reset(q->input_fifo);
+    if (q->input_fifo)
+        av_fifo_reset(q->input_fifo);
 }
 
 int ff_qsv_decode_close(QSVContext *q)

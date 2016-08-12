@@ -28,9 +28,9 @@
 #include "internal.h"
 #include "mpeg_er.h"
 #include "msmpeg4.h"
-#include "msmpeg4data.h"
 #include "qpeldsp.h"
 #include "vc1.h"
+#include "wmv2data.h"
 #include "mss12.h"
 #include "mss2dsp.h"
 
@@ -210,8 +210,13 @@ static int decode_555(GetByteContext *gB, uint16_t *dst, int stride,
                     last_symbol = b << 8 | bytestream2_get_byte(gB);
                 else if (b > 129) {
                     repeat = 0;
-                    while (b-- > 130)
+                    while (b-- > 130) {
+                        if (repeat >= (INT_MAX >> 8) - 1) {
+                            av_log(NULL, AV_LOG_ERROR, "repeat overflow\n");
+                            return AVERROR_INVALIDDATA;
+                        }
                         repeat = (repeat << 8) + bytestream2_get_byte(gB) + 1;
+                    }
                     if (last_symbol == -2) {
                         int skip = FFMIN((unsigned)repeat, dst + w - p);
                         repeat -= skip;
@@ -476,9 +481,6 @@ static int mss2_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
     Rectangle wmv9rects[MAX_WMV9_RECTANGLES], *r;
     int used_rects = 0, i, implicit_rect = 0, av_uninit(wmv9_mask);
-
-    av_assert0(AV_INPUT_BUFFER_PADDING_SIZE >=
-               ARITH2_PADDING + (MIN_CACHE_BITS + 7) / 8);
 
     if ((ret = init_get_bits8(&gb, buf, buf_size)) < 0)
         return ret;

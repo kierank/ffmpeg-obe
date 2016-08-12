@@ -20,7 +20,7 @@
 
 /**
  * @file
- * VP8 encoder support via libvpx
+ * VP8/9 encoder support via libvpx
  */
 
 #define VPX_DISABLE_CTRL_TYPECHECKS 1
@@ -32,6 +32,7 @@
 #include "internal.h"
 #include "libavutil/avassert.h"
 #include "libvpx.h"
+#include "profiles.h"
 #include "libavutil/base64.h"
 #include "libavutil/common.h"
 #include "libavutil/internal.h"
@@ -59,7 +60,7 @@ struct FrameListData {
     struct FrameListData *next;
 };
 
-typedef struct VP8EncoderContext {
+typedef struct VPxEncoderContext {
     AVClass *class;
     struct vpx_codec_ctx encoder;
     struct vpx_image rawimg;
@@ -87,6 +88,8 @@ typedef struct VP8EncoderContext {
     int arnr_strength;
     int arnr_type;
 
+    int tune;
+
     int lag_in_frames;
     int error_resilient;
     int crf;
@@ -101,7 +104,10 @@ typedef struct VP8EncoderContext {
     int tile_rows;
     int frame_parallel;
     int aq_mode;
-} VP8Context;
+    int drop_threshold;
+    int noise_sensitivity;
+    int vpx_cs;
+} VPxContext;
 
 /** String mappings for enum vp8e_enc_control_id */
 static const char *const ctlidstr[] = {
@@ -113,6 +119,7 @@ static const char *const ctlidstr[] = {
     [VP8E_SET_ARNR_MAXFRAMES]    = "VP8E_SET_ARNR_MAXFRAMES",
     [VP8E_SET_ARNR_STRENGTH]     = "VP8E_SET_ARNR_STRENGTH",
     [VP8E_SET_ARNR_TYPE]         = "VP8E_SET_ARNR_TYPE",
+    [VP8E_SET_TUNING]            = "VP8E_SET_TUNING",
     [VP8E_SET_CQ_LEVEL]          = "VP8E_SET_CQ_LEVEL",
     [VP8E_SET_MAX_INTRA_BITRATE_PCT] = "VP8E_SET_MAX_INTRA_BITRATE_PCT",
 #if CONFIG_LIBVPX_VP9_ENCODER
@@ -124,12 +131,15 @@ static const char *const ctlidstr[] = {
 #if VPX_ENCODER_ABI_VERSION > 8
     [VP9E_SET_COLOR_SPACE]             = "VP9E_SET_COLOR_SPACE",
 #endif
+#if VPX_ENCODER_ABI_VERSION >= 11
+    [VP9E_SET_COLOR_RANGE]             = "VP9E_SET_COLOR_RANGE",
+#endif
 #endif
 };
 
 static av_cold void log_encoder_error(AVCodecContext *avctx, const char *desc)
 {
-    VP8Context *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
     const char *error  = vpx_codec_error(&ctx->encoder);
     const char *detail = vpx_codec_error_detail(&ctx->encoder);
 
@@ -232,7 +242,7 @@ static av_cold void free_frame_list(struct FrameListData *list)
 static av_cold int codecctl_int(AVCodecContext *avctx,
                                 enum vp8e_enc_control_id id, int val)
 {
-    VP8Context *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
     char buf[80];
     int width = -30;
     int res;
@@ -250,9 +260,9 @@ static av_cold int codecctl_int(AVCodecContext *avctx,
     return res == VPX_CODEC_OK ? 0 : AVERROR(EINVAL);
 }
 
-static av_cold int vp8_free(AVCodecContext *avctx)
+static av_cold int vpx_free(AVCodecContext *avctx)
 {
-    VP8Context *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
 
     vpx_codec_destroy(&ctx->encoder);
     if (ctx->is_alpha)
@@ -268,11 +278,13 @@ static int set_pix_fmt(AVCodecContext *avctx, vpx_codec_caps_t codec_caps,
                        struct vpx_codec_enc_cfg *enccfg, vpx_codec_flags_t *flags,
                        vpx_img_fmt_t *img_fmt)
 {
+    VPxContext av_unused *ctx = avctx->priv_data;
 #ifdef VPX_IMG_FMT_HIGHBITDEPTH
     enccfg->g_bit_depth = enccfg->g_input_bit_depth = 8;
 #endif
     switch (avctx->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
+    case AV_PIX_FMT_YUVA420P:
         enccfg->g_profile = 0;
         *img_fmt = VPX_IMG_FMT_I420;
         return 0;
@@ -285,28 +297,30 @@ static int set_pix_fmt(AVCodecContext *avctx, vpx_codec_caps_t codec_caps,
         enccfg->g_profile = 1;
         *img_fmt = VPX_IMG_FMT_I440;
         return 0;
+    case AV_PIX_FMT_GBRP:
+        ctx->vpx_cs = VPX_CS_SRGB;
 #endif
     case AV_PIX_FMT_YUV444P:
         enccfg->g_profile = 1;
         *img_fmt = VPX_IMG_FMT_I444;
         return 0;
 #ifdef VPX_IMG_FMT_HIGHBITDEPTH
-    case AV_PIX_FMT_YUV420P10LE:
-    case AV_PIX_FMT_YUV420P12LE:
+    case AV_PIX_FMT_YUV420P10:
+    case AV_PIX_FMT_YUV420P12:
         if (codec_caps & VPX_CODEC_CAP_HIGHBITDEPTH) {
             enccfg->g_bit_depth = enccfg->g_input_bit_depth =
-                avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE ? 10 : 12;
+                avctx->pix_fmt == AV_PIX_FMT_YUV420P10 ? 10 : 12;
             enccfg->g_profile = 2;
             *img_fmt = VPX_IMG_FMT_I42016;
             *flags |= VPX_CODEC_USE_HIGHBITDEPTH;
             return 0;
         }
         break;
-    case AV_PIX_FMT_YUV422P10LE:
-    case AV_PIX_FMT_YUV422P12LE:
+    case AV_PIX_FMT_YUV422P10:
+    case AV_PIX_FMT_YUV422P12:
         if (codec_caps & VPX_CODEC_CAP_HIGHBITDEPTH) {
             enccfg->g_bit_depth = enccfg->g_input_bit_depth =
-                avctx->pix_fmt == AV_PIX_FMT_YUV422P10LE ? 10 : 12;
+                avctx->pix_fmt == AV_PIX_FMT_YUV422P10 ? 10 : 12;
             enccfg->g_profile = 3;
             *img_fmt = VPX_IMG_FMT_I42216;
             *flags |= VPX_CODEC_USE_HIGHBITDEPTH;
@@ -314,23 +328,27 @@ static int set_pix_fmt(AVCodecContext *avctx, vpx_codec_caps_t codec_caps,
         }
         break;
 #if VPX_IMAGE_ABI_VERSION >= 3
-    case AV_PIX_FMT_YUV440P10LE:
-    case AV_PIX_FMT_YUV440P12LE:
+    case AV_PIX_FMT_YUV440P10:
+    case AV_PIX_FMT_YUV440P12:
         if (codec_caps & VPX_CODEC_CAP_HIGHBITDEPTH) {
             enccfg->g_bit_depth = enccfg->g_input_bit_depth =
-                avctx->pix_fmt == AV_PIX_FMT_YUV440P10LE ? 10 : 12;
+                avctx->pix_fmt == AV_PIX_FMT_YUV440P10 ? 10 : 12;
             enccfg->g_profile = 3;
             *img_fmt = VPX_IMG_FMT_I44016;
             *flags |= VPX_CODEC_USE_HIGHBITDEPTH;
             return 0;
         }
         break;
+    case AV_PIX_FMT_GBRP10:
+    case AV_PIX_FMT_GBRP12:
+        ctx->vpx_cs = VPX_CS_SRGB;
 #endif
-    case AV_PIX_FMT_YUV444P10LE:
-    case AV_PIX_FMT_YUV444P12LE:
+    case AV_PIX_FMT_YUV444P10:
+    case AV_PIX_FMT_YUV444P12:
         if (codec_caps & VPX_CODEC_CAP_HIGHBITDEPTH) {
             enccfg->g_bit_depth = enccfg->g_input_bit_depth =
-                avctx->pix_fmt == AV_PIX_FMT_YUV444P10LE ? 10 : 12;
+                avctx->pix_fmt == AV_PIX_FMT_YUV444P10 ||
+                avctx->pix_fmt == AV_PIX_FMT_GBRP10 ? 10 : 12;
             enccfg->g_profile = 3;
             *img_fmt = VPX_IMG_FMT_I44416;
             *flags |= VPX_CODEC_USE_HIGHBITDEPTH;
@@ -349,22 +367,45 @@ static int set_pix_fmt(AVCodecContext *avctx, vpx_codec_caps_t codec_caps,
 static void set_colorspace(AVCodecContext *avctx)
 {
     enum vpx_color_space vpx_cs;
+    VPxContext *ctx = avctx->priv_data;
 
-    switch (avctx->colorspace) {
-    case AVCOL_SPC_RGB:         vpx_cs = VPX_CS_SRGB;      break;
-    case AVCOL_SPC_BT709:       vpx_cs = VPX_CS_BT_709;    break;
-    case AVCOL_SPC_UNSPECIFIED: vpx_cs = VPX_CS_UNKNOWN;   break;
-    case AVCOL_SPC_RESERVED:    vpx_cs = VPX_CS_RESERVED;  break;
-    case AVCOL_SPC_BT470BG:     vpx_cs = VPX_CS_BT_601;    break;
-    case AVCOL_SPC_SMPTE170M:   vpx_cs = VPX_CS_SMPTE_170; break;
-    case AVCOL_SPC_SMPTE240M:   vpx_cs = VPX_CS_SMPTE_240; break;
-    case AVCOL_SPC_BT2020_NCL:  vpx_cs = VPX_CS_BT_2020;   break;
-    default:
-        av_log(avctx, AV_LOG_WARNING, "Unsupported colorspace (%d)\n",
-               avctx->colorspace);
-        return;
+    if (ctx->vpx_cs) {
+        vpx_cs = ctx->vpx_cs;
+    } else {
+        switch (avctx->colorspace) {
+        case AVCOL_SPC_RGB:         vpx_cs = VPX_CS_SRGB;      break;
+        case AVCOL_SPC_BT709:       vpx_cs = VPX_CS_BT_709;    break;
+        case AVCOL_SPC_UNSPECIFIED: vpx_cs = VPX_CS_UNKNOWN;   break;
+        case AVCOL_SPC_RESERVED:    vpx_cs = VPX_CS_RESERVED;  break;
+        case AVCOL_SPC_BT470BG:     vpx_cs = VPX_CS_BT_601;    break;
+        case AVCOL_SPC_SMPTE170M:   vpx_cs = VPX_CS_SMPTE_170; break;
+        case AVCOL_SPC_SMPTE240M:   vpx_cs = VPX_CS_SMPTE_240; break;
+        case AVCOL_SPC_BT2020_NCL:  vpx_cs = VPX_CS_BT_2020;   break;
+        default:
+            av_log(avctx, AV_LOG_WARNING, "Unsupported colorspace (%d)\n",
+                   avctx->colorspace);
+            return;
+        }
     }
     codecctl_int(avctx, VP9E_SET_COLOR_SPACE, vpx_cs);
+}
+#endif
+
+#if VPX_ENCODER_ABI_VERSION >= 11
+static void set_color_range(AVCodecContext *avctx)
+{
+    enum vpx_color_range vpx_cr;
+    switch (avctx->color_range) {
+    case AVCOL_RANGE_UNSPECIFIED:
+    case AVCOL_RANGE_MPEG:       vpx_cr = VPX_CR_STUDIO_RANGE; break;
+    case AVCOL_RANGE_JPEG:       vpx_cr = VPX_CR_FULL_RANGE;   break;
+    default:
+        av_log(avctx, AV_LOG_WARNING, "Unsupported color range (%d)\n",
+               avctx->color_range);
+        return;
+    }
+
+    codecctl_int(avctx, VP9E_SET_COLOR_RANGE, vpx_cr);
 }
 #endif
 #endif
@@ -372,7 +413,7 @@ static void set_colorspace(AVCodecContext *avctx)
 static av_cold int vpx_init(AVCodecContext *avctx,
                             const struct vpx_codec_iface *iface)
 {
-    VP8Context *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
     struct vpx_codec_enc_cfg enccfg = { 0 };
     struct vpx_codec_enc_cfg enccfg_alpha;
     vpx_codec_flags_t flags = (avctx->flags & AV_CODEC_FLAG_PSNR) ? VPX_CODEC_USE_PSNR : 0;
@@ -475,7 +516,13 @@ static av_cold int vpx_init(AVCodecContext *avctx,
         }
     }
 
-    enccfg.rc_dropframe_thresh = avctx->frame_skip_threshold;
+#if FF_API_PRIVATE_OPT
+FF_DISABLE_DEPRECATION_WARNINGS
+    if (avctx->frame_skip_threshold)
+        ctx->drop_threshold = avctx->frame_skip_threshold;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+    enccfg.rc_dropframe_thresh = ctx->drop_threshold;
 
     //0-100 (0 => CBR, 100 => VBR)
     enccfg.rc_2pass_vbr_bias_pct           = lrint(avctx->qcompress * 100);
@@ -581,9 +628,17 @@ static av_cold int vpx_init(AVCodecContext *avctx,
         codecctl_int(avctx, VP8E_SET_ARNR_STRENGTH,    ctx->arnr_strength);
     if (ctx->arnr_type >= 0)
         codecctl_int(avctx, VP8E_SET_ARNR_TYPE,        ctx->arnr_type);
+    if (ctx->tune >= 0)
+        codecctl_int(avctx, VP8E_SET_TUNING,           ctx->tune);
 
     if (CONFIG_LIBVPX_VP8_ENCODER && avctx->codec_id == AV_CODEC_ID_VP8) {
-        codecctl_int(avctx, VP8E_SET_NOISE_SENSITIVITY, avctx->noise_reduction);
+#if FF_API_PRIVATE_OPT
+FF_DISABLE_DEPRECATION_WARNINGS
+        if (avctx->noise_reduction)
+            ctx->noise_sensitivity = avctx->noise_reduction;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+        codecctl_int(avctx, VP8E_SET_NOISE_SENSITIVITY, ctx->noise_sensitivity);
         codecctl_int(avctx, VP8E_SET_TOKEN_PARTITIONS,  av_log2(avctx->slices));
     }
 #if FF_API_MPV_OPT
@@ -615,6 +670,9 @@ static av_cold int vpx_init(AVCodecContext *avctx,
             codecctl_int(avctx, VP9E_SET_AQ_MODE, ctx->aq_mode);
 #if VPX_ENCODER_ABI_VERSION > 8
         set_colorspace(avctx);
+#endif
+#if VPX_ENCODER_ABI_VERSION >= 11
+        set_color_range(avctx);
 #endif
     }
 #endif
@@ -651,7 +709,7 @@ static av_cold int vpx_init(AVCodecContext *avctx,
 static inline void cx_pktcpy(struct FrameListData *dst,
                              const struct vpx_codec_cx_pkt *src,
                              const struct vpx_codec_cx_pkt *src_alpha,
-                             VP8Context *ctx)
+                             VPxContext *ctx)
 {
     dst->pts      = src->data.frame.pts;
     dst->duration = src->data.frame.duration;
@@ -770,7 +828,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
  */
 static int queue_frames(AVCodecContext *avctx, AVPacket *pkt_out)
 {
-    VP8Context *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
     const struct vpx_codec_cx_pkt *pkt;
     const struct vpx_codec_cx_pkt *pkt_alpha = NULL;
     const void *iter = NULL;
@@ -870,10 +928,10 @@ static int queue_frames(AVCodecContext *avctx, AVPacket *pkt_out)
     return size;
 }
 
-static int vp8_encode(AVCodecContext *avctx, AVPacket *pkt,
+static int vpx_encode(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame, int *got_packet)
 {
-    VP8Context *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
     struct vpx_image *rawimg = NULL;
     struct vpx_image *rawimg_alpha = NULL;
     int64_t timestamp = 0;
@@ -952,7 +1010,7 @@ static int vp8_encode(AVCodecContext *avctx, AVPacket *pkt,
     return 0;
 }
 
-#define OFFSET(x) offsetof(VP8Context, x)
+#define OFFSET(x) offsetof(VPxContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 
 #ifndef VPX_ERROR_RESILIENT_DEFAULT
@@ -961,7 +1019,6 @@ static int vp8_encode(AVCodecContext *avctx, AVPacket *pkt,
 #endif
 
 #define COMMON_OPTIONS \
-    { "cpu-used",        "Quality/Speed ratio modifier",           OFFSET(cpu_used),        AV_OPT_TYPE_INT, {.i64 = 1},       -16,     16,      VE}, \
     { "auto-alt-ref",    "Enable use of alternate reference " \
                          "frames (2-pass only)",                   OFFSET(auto_alt_ref),    AV_OPT_TYPE_BOOL, {.i64 = -1},     -1,      1,       VE}, \
     { "lag-in-frames",   "Number of frames to look ahead for " \
@@ -972,6 +1029,9 @@ static int vp8_encode(AVCodecContext *avctx, AVPacket *pkt,
     { "backward",        NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 1}, 0, 0, VE, "arnr_type" }, \
     { "forward",         NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 2}, 0, 0, VE, "arnr_type" }, \
     { "centered",        NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 3}, 0, 0, VE, "arnr_type" }, \
+    { "tune",            "Tune the encoding to a specific scenario", OFFSET(tune),          AV_OPT_TYPE_INT, {.i64 = -1},      -1,      INT_MAX, VE, "tune"}, \
+    { "psnr",            NULL, 0, AV_OPT_TYPE_CONST, {.i64 = VP8_TUNE_PSNR}, 0, 0, VE, "tune"}, \
+    { "ssim",            NULL, 0, AV_OPT_TYPE_CONST, {.i64 = VP8_TUNE_SSIM}, 0, 0, VE, "tune"}, \
     { "deadline",        "Time to spend encoding, in microseconds.", OFFSET(deadline),      AV_OPT_TYPE_INT, {.i64 = VPX_DL_GOOD_QUALITY}, INT_MIN, INT_MAX, VE, "quality"}, \
     { "best",            NULL, 0, AV_OPT_TYPE_CONST, {.i64 = VPX_DL_BEST_QUALITY}, 0, 0, VE, "quality"}, \
     { "good",            NULL, 0, AV_OPT_TYPE_CONST, {.i64 = VPX_DL_GOOD_QUALITY}, 0, 0, VE, "quality"}, \
@@ -983,25 +1043,28 @@ static int vp8_encode(AVCodecContext *avctx, AVPacket *pkt,
                          "by the bool decoder, meaning that partitions can be decoded even " \
                          "though earlier partitions have been lost. Note that intra predicition" \
                          " is still done over the partition boundary.",       0, AV_OPT_TYPE_CONST, {.i64 = VPX_ERROR_RESILIENT_PARTITIONS}, 0, 0, VE, "er"}, \
-    { "crf",              "Select the quality for constant quality mode", offsetof(VP8Context, crf), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 63, VE }, \
+    { "crf",              "Select the quality for constant quality mode", offsetof(VPxContext, crf), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 63, VE }, \
     { "static-thresh",    "A change threshold on blocks below which they will be skipped by the encoder", OFFSET(static_thresh), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VE }, \
+    { "drop-threshold",   "Frame drop threshold", offsetof(VPxContext, drop_threshold), AV_OPT_TYPE_INT, {.i64 = 0 }, INT_MIN, INT_MAX, VE }, \
+    { "noise-sensitivity", "Noise sensitivity", OFFSET(noise_sensitivity), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 4, VE}, \
     { "undershoot-pct",  "Datarate undershoot (min) target (%)", OFFSET(rc_undershoot_pct), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 100, VE }, \
     { "overshoot-pct",   "Datarate overshoot (max) target (%)", OFFSET(rc_overshoot_pct), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 1000, VE }, \
 
 #define LEGACY_OPTIONS \
-    {"speed", "", offsetof(VP8Context, cpu_used), AV_OPT_TYPE_INT, {.i64 = 1}, -16, 16, VE}, \
-    {"quality", "", offsetof(VP8Context, deadline), AV_OPT_TYPE_INT, {.i64 = VPX_DL_GOOD_QUALITY}, INT_MIN, INT_MAX, VE, "quality"}, \
-    {"vp8flags", "", offsetof(VP8Context, flags), AV_OPT_TYPE_FLAGS, {.i64 = 0}, 0, UINT_MAX, VE, "flags"}, \
+    {"speed", "", offsetof(VPxContext, cpu_used), AV_OPT_TYPE_INT, {.i64 = 1}, -16, 16, VE}, \
+    {"quality", "", offsetof(VPxContext, deadline), AV_OPT_TYPE_INT, {.i64 = VPX_DL_GOOD_QUALITY}, INT_MIN, INT_MAX, VE, "quality"}, \
+    {"vp8flags", "", offsetof(VPxContext, flags), AV_OPT_TYPE_FLAGS, {.i64 = 0}, 0, UINT_MAX, VE, "flags"}, \
     {"error_resilient", "enable error resilience", 0, AV_OPT_TYPE_CONST, {.i64 = VP8F_ERROR_RESILIENT}, INT_MIN, INT_MAX, VE, "flags"}, \
     {"altref", "enable use of alternate reference frames (VP8/2-pass only)", 0, AV_OPT_TYPE_CONST, {.i64 = VP8F_AUTO_ALT_REF}, INT_MIN, INT_MAX, VE, "flags"}, \
-    {"arnr_max_frames", "altref noise reduction max frame count", offsetof(VP8Context, arnr_max_frames), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 15, VE}, \
-    {"arnr_strength", "altref noise reduction filter strength", offsetof(VP8Context, arnr_strength), AV_OPT_TYPE_INT, {.i64 = 3}, 0, 6, VE}, \
-    {"arnr_type", "altref noise reduction filter type", offsetof(VP8Context, arnr_type), AV_OPT_TYPE_INT, {.i64 = 3}, 1, 3, VE}, \
-    {"rc_lookahead", "Number of frames to look ahead for alternate reference frame selection", offsetof(VP8Context, lag_in_frames), AV_OPT_TYPE_INT, {.i64 = 25}, 0, 25, VE}, \
+    {"arnr_max_frames", "altref noise reduction max frame count", offsetof(VPxContext, arnr_max_frames), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 15, VE}, \
+    {"arnr_strength", "altref noise reduction filter strength", offsetof(VPxContext, arnr_strength), AV_OPT_TYPE_INT, {.i64 = 3}, 0, 6, VE}, \
+    {"arnr_type", "altref noise reduction filter type", offsetof(VPxContext, arnr_type), AV_OPT_TYPE_INT, {.i64 = 3}, 1, 3, VE}, \
+    {"rc_lookahead", "Number of frames to look ahead for alternate reference frame selection", offsetof(VPxContext, lag_in_frames), AV_OPT_TYPE_INT, {.i64 = 25}, 0, 25, VE}, \
 
 #if CONFIG_LIBVPX_VP8_ENCODER
 static const AVOption vp8_options[] = {
     COMMON_OPTIONS
+    { "cpu-used",        "Quality/Speed ratio modifier",                OFFSET(cpu_used),        AV_OPT_TYPE_INT, {.i64 = 1}, -16, 16, VE},
     LEGACY_OPTIONS
     { NULL }
 };
@@ -1010,6 +1073,7 @@ static const AVOption vp8_options[] = {
 #if CONFIG_LIBVPX_VP9_ENCODER
 static const AVOption vp9_options[] = {
     COMMON_OPTIONS
+    { "cpu-used",        "Quality/Speed ratio modifier",                OFFSET(cpu_used),        AV_OPT_TYPE_INT, {.i64 = 1},  -8, 8, VE},
     { "lossless",        "Lossless mode",                               OFFSET(lossless),        AV_OPT_TYPE_INT, {.i64 = -1}, -1, 1, VE},
     { "tile-columns",    "Number of tile columns to use, log2",         OFFSET(tile_columns),    AV_OPT_TYPE_INT, {.i64 = -1}, -1, 6, VE},
     { "tile-rows",       "Number of tile rows to use, log2",            OFFSET(tile_rows),       AV_OPT_TYPE_INT, {.i64 = -1}, -1, 2, VE},
@@ -1053,10 +1117,10 @@ AVCodec ff_libvpx_vp8_encoder = {
     .long_name      = NULL_IF_CONFIG_SMALL("libvpx VP8"),
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_VP8,
-    .priv_data_size = sizeof(VP8Context),
+    .priv_data_size = sizeof(VPxContext),
     .init           = vp8_init,
-    .encode2        = vp8_encode,
-    .close          = vp8_free,
+    .encode2        = vpx_encode,
+    .close          = vpx_free,
     .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AUTO_THREADS,
     .pix_fmts       = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVA420P, AV_PIX_FMT_NONE },
     .priv_class     = &class_vp8,
@@ -1077,25 +1141,17 @@ static const AVClass class_vp9 = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-static const AVProfile profiles[] = {
-    { FF_PROFILE_VP9_0, "Profile 0" },
-    { FF_PROFILE_VP9_1, "Profile 1" },
-    { FF_PROFILE_VP9_2, "Profile 2" },
-    { FF_PROFILE_VP9_3, "Profile 3" },
-    { FF_PROFILE_UNKNOWN },
-};
-
 AVCodec ff_libvpx_vp9_encoder = {
     .name           = "libvpx-vp9",
     .long_name      = NULL_IF_CONFIG_SMALL("libvpx VP9"),
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_VP9,
-    .priv_data_size = sizeof(VP8Context),
+    .priv_data_size = sizeof(VPxContext),
     .init           = vp9_init,
-    .encode2        = vp8_encode,
-    .close          = vp8_free,
+    .encode2        = vpx_encode,
+    .close          = vpx_free,
     .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AUTO_THREADS,
-    .profiles       = NULL_IF_CONFIG_SMALL(profiles),
+    .profiles       = NULL_IF_CONFIG_SMALL(ff_vp9_profiles),
     .priv_class     = &class_vp9,
     .defaults       = defaults,
     .init_static_data = ff_vp9_init_static,
