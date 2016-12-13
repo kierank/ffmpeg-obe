@@ -361,6 +361,13 @@ struct AVFilterContext {
      * hardware context information.
      */
     AVBufferRef *hw_device_ctx;
+
+    /**
+     * Max number of threads allowed in this filter instance.
+     * If <= 0, its value is ignored.
+     * Overrides global number of threads set per filter graph.
+     */
+    int nb_threads;
 };
 
 /**
@@ -526,7 +533,7 @@ struct AVFilterLink {
     /**
      * Number of past frames sent through the link.
      */
-    int64_t frame_count;
+    int64_t frame_count_in, frame_count_out;
 
     /**
      * A pointer to a FFVideoFramePool struct.

@@ -90,7 +90,7 @@ static int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
     int ret, i;
 
     ret = ff_h2645_packet_split(&ctx->pkt, buf, buf_size, avctx, 0, 0,
-                                AV_CODEC_ID_HEVC);
+                                AV_CODEC_ID_HEVC, 1);
     if (ret < 0)
         return ret;
 
@@ -243,7 +243,7 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
                 src_length = 20;
         }
 
-        consumed = ff_h2645_extract_rbsp(buf, src_length, nal);
+        consumed = ff_h2645_extract_rbsp(buf, src_length, nal, 1);
         if (consumed < 0)
             return consumed;
 
@@ -311,6 +311,14 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
                 ps->sps = (HEVCSPS*)ps->sps_list[ps->pps->sps_id]->data;
                 ps->vps = (HEVCVPS*)ps->vps_list[ps->sps->vps_id]->data;
             }
+
+            s->coded_width  = ps->sps->width;
+            s->coded_height = ps->sps->height;
+            s->width        = ps->sps->output_width;
+            s->height       = ps->sps->output_height;
+            s->format       = ps->sps->pix_fmt;
+            avctx->profile  = ps->sps->ptl.general_ptl.profile_idc;
+            avctx->level    = ps->sps->ptl.general_ptl.level_idc;
 
             if (!sh->first_slice_in_pic_flag) {
                 int slice_address_length;

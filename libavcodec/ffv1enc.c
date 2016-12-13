@@ -573,15 +573,22 @@ FF_ENABLE_DEPRECATION_WARNINGS
     case AV_PIX_FMT_YUVA420P9:
         if (!avctx->bits_per_raw_sample)
             s->bits_per_raw_sample = 9;
+    case AV_PIX_FMT_GRAY10:
     case AV_PIX_FMT_YUV444P10:
     case AV_PIX_FMT_YUV420P10:
     case AV_PIX_FMT_YUV422P10:
     case AV_PIX_FMT_YUVA444P10:
     case AV_PIX_FMT_YUVA422P10:
     case AV_PIX_FMT_YUVA420P10:
-        s->packed_at_lsb = 1;
         if (!avctx->bits_per_raw_sample && !s->bits_per_raw_sample)
             s->bits_per_raw_sample = 10;
+    case AV_PIX_FMT_GRAY12:
+    case AV_PIX_FMT_YUV444P12:
+    case AV_PIX_FMT_YUV420P12:
+    case AV_PIX_FMT_YUV422P12:
+        s->packed_at_lsb = 1;
+        if (!avctx->bits_per_raw_sample && !s->bits_per_raw_sample)
+            s->bits_per_raw_sample = 12;
     case AV_PIX_FMT_GRAY16:
     case AV_PIX_FMT_YUV444P16:
     case AV_PIX_FMT_YUV422P16:
@@ -597,11 +604,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
         if (s->bits_per_raw_sample <= 8) {
             av_log(avctx, AV_LOG_ERROR, "bits_per_raw_sample invalid\n");
             return AVERROR_INVALIDDATA;
-        }
-        if (s->ac == AC_GOLOMB_RICE) {
-            av_log(avctx, AV_LOG_INFO,
-                   "bits_per_raw_sample > 8, forcing range coder\n");
-            s->ac = AC_RANGE_CUSTOM_TAB;
         }
         s->version = FFMAX(s->version, 1);
     case AV_PIX_FMT_GRAY8:
@@ -628,6 +630,17 @@ FF_ENABLE_DEPRECATION_WARNINGS
         s->transparency = 1;
         s->chroma_planes = 1;
         s->bits_per_raw_sample = 8;
+        break;
+    case AV_PIX_FMT_RGB48:
+        s->colorspace = 1;
+        s->chroma_planes = 1;
+        s->bits_per_raw_sample = 16;
+        s->use32bit = 1;
+        s->version = FFMAX(s->version, 1);
+        if (avctx->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
+            av_log(avctx, AV_LOG_ERROR, "16bit RGB is experimental and under development, only use it for experiments\n");
+            return AVERROR_INVALIDDATA;
+        }
         break;
     case AV_PIX_FMT_0RGB32:
         s->colorspace = 1;
@@ -661,11 +674,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
         s->version = FFMAX(s->version, 1);
-        if (s->ac == AC_GOLOMB_RICE) {
-            av_log(avctx, AV_LOG_INFO,
-                   "bits_per_raw_sample > 8, forcing coder 1\n");
-            s->ac = AC_RANGE_CUSTOM_TAB;
-        }
         break;
     default:
         av_log(avctx, AV_LOG_ERROR, "format not supported\n");
@@ -673,6 +681,13 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
     av_assert0(s->bits_per_raw_sample >= 8);
 
+    if (s->bits_per_raw_sample > 8) {
+        if (s->ac == AC_GOLOMB_RICE) {
+            av_log(avctx, AV_LOG_INFO,
+                    "bits_per_raw_sample > 8, forcing range coder\n");
+            s->ac = AC_RANGE_CUSTOM_TAB;
+        }
+    }
     if (s->transparency) {
         av_log(avctx, AV_LOG_WARNING, "Storing alpha plane, this will require a recent FFV1 decoder to playback!\n");
     }
@@ -1010,8 +1025,8 @@ static int encode_slice(AVCodecContext *c, void *arg)
     int ret;
     RangeCoder c_bak = fs->c;
     const uint8_t *planes[3] = {p->data[0] + ps*x + y*p->linesize[0],
-                                p->data[1] + ps*x + y*p->linesize[1],
-                                p->data[2] + ps*x + y*p->linesize[2]};
+                                p->data[1] ? p->data[1] + ps*x + y*p->linesize[1] : NULL,
+                                p->data[2] ? p->data[2] + ps*x + y*p->linesize[2] : NULL};
 
     fs->slice_coding_mode = 0;
     if (f->version > 3) {
@@ -1081,7 +1096,6 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     FFV1Context *f      = avctx->priv_data;
     RangeCoder *const c = &f->slice_context[0]->c;
     AVFrame *const p    = f->picture.f;
-    int used_count      = 0;
     uint8_t keystate    = 128;
     uint8_t *buf_p;
     int i, ret;
@@ -1137,6 +1151,11 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     if (f->version > 3)
         maxsize = AV_INPUT_BUFFER_MIN_SIZE + avctx->width*avctx->height*3LL*4;
 
+    if (maxsize > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE - 32) {
+        av_log(avctx, AV_LOG_WARNING, "Cannot allocate worst case packet size, the encoding could fail\n");
+        maxsize = INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE - 32;
+    }
+
     if ((ret = ff_alloc_packet2(avctx, pkt, maxsize, 0)) < 0)
         return ret;
 
@@ -1170,11 +1189,17 @@ FF_ENABLE_DEPRECATION_WARNINGS
         }
     }
 
-    for (i = 1; i < f->slice_count; i++) {
+    for (i = 0; i < f->slice_count; i++) {
         FFV1Context *fs = f->slice_context[i];
-        uint8_t *start  = pkt->data + (pkt->size - used_count) * (int64_t)i / f->slice_count;
+        uint8_t *start  = pkt->data + pkt->size * (int64_t)i / f->slice_count;
         int len         = pkt->size / f->slice_count;
-        ff_init_range_encoder(&fs->c, start, len);
+        if (i) {
+            ff_init_range_encoder(&fs->c, start, len);
+        } else {
+            av_assert0(fs->c.bytestream_end >= fs->c.bytestream_start + len);
+            av_assert0(fs->c.bytestream < fs->c.bytestream_start + len);
+            fs->c.bytestream_end = fs->c.bytestream_start + len;
+        }
     }
     avctx->execute(avctx, encode_slice, &f->slice_context[0], NULL,
                    f->slice_count, sizeof(void *));
@@ -1284,13 +1309,15 @@ AVCodec ff_ffv1_encoder = {
         AV_PIX_FMT_YUV410P,   AV_PIX_FMT_0RGB32,    AV_PIX_FMT_RGB32,     AV_PIX_FMT_YUV420P16,
         AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16, AV_PIX_FMT_YUV444P9,  AV_PIX_FMT_YUV422P9,
         AV_PIX_FMT_YUV420P9,  AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
+        AV_PIX_FMT_YUV420P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV444P12,
         AV_PIX_FMT_YUVA444P16, AV_PIX_FMT_YUVA422P16, AV_PIX_FMT_YUVA420P16,
         AV_PIX_FMT_YUVA444P10, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA420P10,
         AV_PIX_FMT_YUVA444P9, AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA420P9,
         AV_PIX_FMT_GRAY16,    AV_PIX_FMT_GRAY8,     AV_PIX_FMT_GBRP9,     AV_PIX_FMT_GBRP10,
         AV_PIX_FMT_GBRP12,    AV_PIX_FMT_GBRP14,
         AV_PIX_FMT_YA8,
-        AV_PIX_FMT_GBRP16,
+        AV_PIX_FMT_GRAY10, AV_PIX_FMT_GRAY12,
+        AV_PIX_FMT_GBRP16, AV_PIX_FMT_RGB48,
         AV_PIX_FMT_NONE
 
     },

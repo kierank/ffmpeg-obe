@@ -149,6 +149,7 @@ static int build_filter(ResampleContext *c, void *filter, double factor, int tap
     double *tab = av_malloc_array(tap_count+1,  sizeof(*tab));
     double *sin_lut = av_malloc_array(ph_nb, sizeof(*sin_lut));
     const int center= (tap_count-1)/2;
+    int ret = AVERROR(ENOMEM);
 
     if (!tab || !sin_lut)
         goto fail;
@@ -292,10 +293,11 @@ static int build_filter(ResampleContext *c, void *filter, double factor, int tap
     }
 #endif
 
+    ret = 0;
 fail:
     av_free(tab);
     av_free(sin_lut);
-    return 0;
+    return ret;
 }
 
 static ResampleContext *resample_init(ResampleContext *c, int out_rate, int in_rate, int filter_size, int phase_shift, int linear,
@@ -447,7 +449,7 @@ static int rebuild_filter_bank_with_compensation(ResampleContext *c)
 static int set_compensation(ResampleContext *c, int sample_delta, int compensation_distance){
     int ret;
 
-    if (compensation_distance) {
+    if (compensation_distance && sample_delta) {
         ret = rebuild_filter_bank_with_compensation(c);
         if (ret < 0)
             return ret;
@@ -494,7 +496,12 @@ static int swri_resample(ResampleContext *c,
 
         dst_size = FFMIN(dst_size, delta_n);
         if (dst_size > 0) {
-            *consumed = c->dsp.resample(c, dst, src, dst_size, update_ctx);
+            /* resample_linear and resample_common should have same behavior
+             * when frac and dst_incr_mod are zero */
+            if (c->linear && (c->frac || c->dst_incr_mod))
+                *consumed = c->dsp.resample_linear(c, dst, src, dst_size, update_ctx);
+            else
+                *consumed = c->dsp.resample_common(c, dst, src, dst_size, update_ctx);
         } else {
             *consumed = 0;
         }

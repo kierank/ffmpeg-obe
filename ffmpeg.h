@@ -212,6 +212,8 @@ typedef struct OptionsContext {
     int        nb_pass;
     SpecifierOpt *passlogfiles;
     int        nb_passlogfiles;
+    SpecifierOpt *max_muxing_queue_size;
+    int        nb_max_muxing_queue_size;
     SpecifierOpt *guess_layout_max;
     int        nb_guess_layout_max;
     SpecifierOpt *apad;
@@ -229,6 +231,18 @@ typedef struct InputFilter {
     struct InputStream *ist;
     struct FilterGraph *graph;
     uint8_t            *name;
+
+    // parameters configured for this input
+    int format;
+
+    int width, height;
+    AVRational sample_aspect_ratio;
+
+    int sample_rate;
+    int channels;
+    uint64_t channel_layout;
+
+    AVBufferRef *hw_frames_ctx;
 } InputFilter;
 
 typedef struct OutputFilter {
@@ -240,6 +254,18 @@ typedef struct OutputFilter {
     /* temporary storage until stream maps are processed */
     AVFilterInOut       *out_tmp;
     enum AVMediaType     type;
+
+    /* desired output stream properties */
+    int width, height;
+    AVRational frame_rate;
+    int format;
+    int sample_rate;
+    uint64_t channel_layout;
+
+    // those are only set if no format is specified and the encoder gives us multiple options
+    int *formats;
+    uint64_t *channel_layouts;
+    int *sample_rates;
 } OutputFilter;
 
 typedef struct FilterGraph {
@@ -287,7 +313,6 @@ typedef struct InputStream {
 
     double ts_scale;
     int saw_first_ts;
-    int showed_multi_packet_warning;
     AVDictionary *decoder_opts;
     AVRational framerate;               /* framerate forced with -r */
     int top_field_first;
@@ -349,6 +374,9 @@ typedef struct InputStream {
     // number of frames/samples retrieved from the decoder
     uint64_t frames_decoded;
     uint64_t samples_decoded;
+
+    int64_t *dts_buffer;
+    int nb_dts_buffer;
 } InputStream;
 
 typedef struct InputFile {
@@ -416,8 +444,13 @@ typedef struct OutputStream {
     int64_t first_pts;
     /* dts of the last packet sent to the muxer */
     int64_t last_mux_dts;
-    AVBitStreamFilterContext *bitstream_filters;
+
+    int                    nb_bitstream_filters;
+    uint8_t                  *bsf_extradata_updated;
+    AVBSFContext            **bsf_ctx;
+
     AVCodecContext *enc_ctx;
+    AVCodecParameters *ref_par; /* associated input codec parameters with encoders options applied */
     AVCodec *enc;
     int64_t max_frames;
     AVFrame *filtered_frame;
@@ -464,6 +497,12 @@ typedef struct OutputStream {
     OSTFinished finished;        /* no more packets should be written for this stream */
     int unavailable;                     /* true if the steram is unavailable (possibly temporarily) */
     int stream_copy;
+
+    // init_output_stream() has been called for this stream
+    // The encoder and the bitstream filters have been initialized and the stream
+    // parameters are set in the AVStream.
+    int initialized;
+
     const char *attachment_filename;
     int copy_initial_nonkeyframes;
     int copy_prior_start;
@@ -472,6 +511,7 @@ typedef struct OutputStream {
     int keep_pix_fmt;
 
     AVCodecParserContext *parser;
+    AVCodecContext       *parser_avctx;
 
     /* stats */
     // combined size of all the packets written
@@ -484,6 +524,11 @@ typedef struct OutputStream {
 
     /* packet quality factor */
     int quality;
+
+    int max_muxing_queue_size;
+
+    /* the packets are buffered here until the muxer is ready to be initialized */
+    AVFifoBuffer *muxing_queue;
 
     /* packet picture type */
     int pict_type;
@@ -501,6 +546,8 @@ typedef struct OutputFile {
     uint64_t limit_filesize; /* filesize limit expressed in bytes */
 
     int shortest;
+
+    int header_written;
 } OutputFile;
 
 extern InputStream **input_streams;
@@ -546,6 +593,9 @@ extern AVIOContext *progress_avio;
 extern float max_error_rate;
 extern char *videotoolbox_pixfmt;
 
+extern int filter_nbthreads;
+extern int filter_complex_nbthreads;
+
 extern const AVIOInterruptCB int_cb;
 
 extern const OptionDef options[];
@@ -576,6 +626,9 @@ int ist_in_filtergraph(FilterGraph *fg, InputStream *ist);
 int filtergraph_is_simple(FilterGraph *fg);
 int init_simple_filtergraph(InputStream *ist, OutputStream *ost);
 int init_complex_filtergraph(FilterGraph *fg);
+
+int ifilter_parameters_from_frame(InputFilter *ifilter, const AVFrame *frame);
+int ifilter_parameters_from_decoder(InputFilter *ifilter, const AVCodecContext *avctx);
 
 int ffmpeg_parse_options(int argc, char **argv);
 

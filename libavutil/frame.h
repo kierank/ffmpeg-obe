@@ -120,7 +120,13 @@ enum AVFrameSideDataType {
      * The GOP timecode in 25 bit timecode format. Data format is 64-bit integer.
      * This is set on the first frame of a GOP that has a temporal reference of 0.
      */
-    AV_FRAME_DATA_GOP_TIMECODE
+    AV_FRAME_DATA_GOP_TIMECODE,
+
+    /**
+     * The data represents the AVSphericalMapping structure defined in
+     * libavutil/spherical.h.
+     */
+    AV_FRAME_DATA_SPHERICAL,
 };
 
 enum AVActiveFormatDescription {
@@ -178,7 +184,7 @@ typedef struct AVFrameSideData {
  * without breaking compatibility with each other.
  *
  * Fields can be accessed through AVOptions, the name string used, matches the
- * C structure field name for fields accessable through AVOptions. The AVClass
+ * C structure field name for fields accessible through AVOptions. The AVClass
  * for AVFrame can be obtained from avcodec_get_frame_class()
  */
 typedef struct AVFrame {
@@ -267,10 +273,14 @@ typedef struct AVFrame {
      */
     int64_t pts;
 
+#if FF_API_PKT_PTS
     /**
      * PTS copied from the AVPacket that was decoded to produce this frame.
+     * @deprecated use the pts field instead
      */
+    attribute_deprecated
     int64_t pkt_pts;
+#endif
 
     /**
      * DTS copied from the AVPacket that triggered returning this frame. (if frame threading isn't used)
@@ -395,6 +405,10 @@ typedef struct AVFrame {
  * The frame data may be corrupted, e.g. due to decoding errors.
  */
 #define AV_FRAME_FLAG_CORRUPT       (1 << 0)
+/**
+ * A flag to mark the frames which need to be decoded, but shouldn't be output.
+ */
+#define AV_FRAME_FLAG_DISCARD   (1 << 2)
 /**
  * @}
  */

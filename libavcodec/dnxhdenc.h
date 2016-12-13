@@ -71,8 +71,8 @@ typedef struct DNXHDEncContext {
     int intra_quant_bias;
 
     DECLARE_ALIGNED(16, int16_t, blocks)[8][64];
-    uint8_t edge_buf_y[256];
-    uint8_t edge_buf_uv[2][128];
+    DECLARE_ALIGNED(16, uint8_t, edge_buf_y)[256];
+    DECLARE_ALIGNED(16, uint8_t, edge_buf_uv)[2][128];
 
     int      (*qmatrix_c)     [64];
     int      (*qmatrix_l)     [64];
@@ -96,6 +96,7 @@ typedef struct DNXHDEncContext {
     uint8_t  *mb_qscale;
 
     RCCMPEntry *mb_cmp;
+    RCCMPEntry *mb_cmp_tmp;
     RCEntry    *mb_rc;
 
     void (*get_pixels_8x4_sym)(int16_t * /* align 16 */,

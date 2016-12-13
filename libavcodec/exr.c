@@ -882,6 +882,22 @@ static int pxr24_uncompress(EXRContext *s, const uint8_t *src,
                     bytestream_put_le16(&out, pixel);
                 }
                 break;
+            case EXR_UINT:
+                ptr[0] = in;
+                ptr[1] = ptr[0] + s->xdelta;
+                ptr[2] = ptr[1] + s->xdelta;
+                ptr[3] = ptr[2] + s->xdelta;
+                in     = ptr[3] + s->xdelta;
+
+                for (j = 0; j < s->xdelta; ++j) {
+                    uint32_t diff = (*(ptr[0]++) << 24) |
+                    (*(ptr[1]++) << 16) |
+                    (*(ptr[2]++) << 8 ) |
+                    (*(ptr[3]++));
+                    pixel += diff;
+                    bytestream_put_le32(&out, pixel);
+                }
+                break;
             default:
                 return AVERROR_INVALIDDATA;
             }
@@ -1029,8 +1045,9 @@ static int decode_block(AVCodecContext *avctx, void *tdata,
     uint64_t line_offset, uncompressed_size;
     uint16_t *ptr_x;
     uint8_t *ptr;
-    uint32_t data_size, line, col = 0;
-    uint32_t tileX, tileY, tileLevelX, tileLevelY;
+    uint32_t data_size;
+    uint64_t line, col = 0;
+    uint64_t tileX, tileY, tileLevelX, tileLevelY;
     const uint8_t *src;
     int axmax = (avctx->width - (s->xmax + 1)) * 2 * s->desc->nb_components; /* nb pixel to add at the right of the datawindow */
     int bxmin = s->xmin * 2 * s->desc->nb_components; /* nb pixel to add at the left of the datawindow */
@@ -1062,8 +1079,17 @@ static int decode_block(AVCodecContext *avctx, void *tdata,
             return AVERROR_PATCHWELCOME;
         }
 
+        if (s->xmin || s->ymin) {
+            avpriv_report_missing_feature(s->avctx, "Tiles with xmin/ymin");
+            return AVERROR_PATCHWELCOME;
+        }
+
         line = s->tile_attr.ySize * tileY;
         col = s->tile_attr.xSize * tileX;
+
+        if (line < s->ymin || line > s->ymax ||
+            col  < s->xmin || col  > s->xmax)
+            return AVERROR_INVALIDDATA;
 
         td->ysize = FFMIN(s->tile_attr.ySize, s->ydelta - tileY * s->tile_attr.ySize);
         td->xsize = FFMIN(s->tile_attr.xSize, s->xdelta - tileX * s->tile_attr.xSize);
@@ -1418,17 +1444,15 @@ static int decode_header(EXRContext *s)
                     return AVERROR_PATCHWELCOME;
                 }
 
-                if (s->channel_offsets[channel_index] == -1){/* channel have not been previously assign */
-                    if (channel_index >= 0) {
-                        if (s->pixel_type != EXR_UNKNOWN &&
-                            s->pixel_type != current_pixel_type) {
-                            av_log(s->avctx, AV_LOG_ERROR,
-                                   "RGB channels not of the same depth.\n");
-                            return AVERROR_INVALIDDATA;
-                        }
-                        s->pixel_type                     = current_pixel_type;
-                        s->channel_offsets[channel_index] = s->current_channel_offset;
+                if (channel_index >= 0 && s->channel_offsets[channel_index] == -1) { /* channel has not been previously assigned */
+                    if (s->pixel_type != EXR_UNKNOWN &&
+                        s->pixel_type != current_pixel_type) {
+                        av_log(s->avctx, AV_LOG_ERROR,
+                               "RGB channels not of the same depth.\n");
+                        return AVERROR_INVALIDDATA;
                     }
+                    s->pixel_type                     = current_pixel_type;
+                    s->channel_offsets[channel_index] = s->current_channel_offset;
                 }
 
                 s->channels = av_realloc(s->channels,
@@ -1440,7 +1464,11 @@ static int decode_header(EXRContext *s)
                 channel->xsub       = xsub;
                 channel->ysub       = ysub;
 
-                s->current_channel_offset += 1 << current_pixel_type;
+                if (current_pixel_type == EXR_HALF) {
+                    s->current_channel_offset += 2;
+                } else {/* Float or UINT32 */
+                    s->current_channel_offset += 4;
+                }
             }
 
             /* Check if all channels are set with an offset or if the channels

@@ -315,13 +315,13 @@ static int mpeg4_decode_sprite_trajectory(Mpeg4DecContext *ctx, GetBitContext *g
         min_ab = FFMIN(alpha, beta);
         w3     = w2 >> min_ab;
         h3     = h2 >> min_ab;
-        s->sprite_offset[0][0] = (sprite_ref[0][0] << (alpha + beta + rho - min_ab)) +
+        s->sprite_offset[0][0] = (sprite_ref[0][0] * (1<<(alpha + beta + rho - min_ab))) +
                                  (-r * sprite_ref[0][0] + virtual_ref[0][0]) *
                                  h3 * (-vop_ref[0][0]) +
                                  (-r * sprite_ref[0][0] + virtual_ref[1][0]) *
                                  w3 * (-vop_ref[0][1]) +
                                  (1 << (alpha + beta + rho - min_ab - 1));
-        s->sprite_offset[0][1] = (sprite_ref[0][1] << (alpha + beta + rho - min_ab)) +
+        s->sprite_offset[0][1] = (sprite_ref[0][1] * (1 << (alpha + beta + rho - min_ab))) +
                                  (-r * sprite_ref[0][1] + virtual_ref[0][1]) *
                                  h3 * (-vop_ref[0][0]) +
                                  (-r * sprite_ref[0][1] + virtual_ref[1][1]) *
@@ -368,10 +368,10 @@ static int mpeg4_decode_sprite_trajectory(Mpeg4DecContext *ctx, GetBitContext *g
         int shift_y = 16 - ctx->sprite_shift[0];
         int shift_c = 16 - ctx->sprite_shift[1];
         for (i = 0; i < 2; i++) {
-            s->sprite_offset[0][i] <<= shift_y;
-            s->sprite_offset[1][i] <<= shift_c;
-            s->sprite_delta[0][i]  <<= shift_y;
-            s->sprite_delta[1][i]  <<= shift_y;
+            s->sprite_offset[0][i] *= 1 << shift_y;
+            s->sprite_offset[1][i] *= 1 << shift_c;
+            s->sprite_delta[0][i]  *= 1 << shift_y;
+            s->sprite_delta[1][i]  *= 1 << shift_y;
             ctx->sprite_shift[i]     = 16;
         }
         s->real_sprite_warping_points = ctx->num_sprite_warping_points;
@@ -2194,6 +2194,13 @@ int ff_mpeg4_workaround_bugs(AVCodecContext *avctx)
 
         if (ctx->lavc_build <= 4712U)
             s->workaround_bugs |= FF_BUG_DC_CLIP;
+
+        if ((ctx->lavc_build&0xFF) >= 100) {
+            if (ctx->lavc_build > 3621476 && ctx->lavc_build < 3752552 &&
+               (ctx->lavc_build < 3752037 || ctx->lavc_build > 3752191) // 3.2.1+
+            )
+                s->workaround_bugs |= FF_BUG_IEDGE;
+        }
 
         if (ctx->divx_version >= 0)
             s->workaround_bugs |= FF_BUG_DIRECT_BLOCKSIZE;

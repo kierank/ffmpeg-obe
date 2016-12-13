@@ -220,6 +220,9 @@ fate-exr-rgb-scanline-pxr24-float-half-l1: CMD = framecrc -i $(TARGET_SAMPLES)/e
 FATE_EXR += fate-exr-rgb-scanline-pxr24-float-half-l2
 fate-exr-rgb-scanline-pxr24-float-half-l2: CMD = framecrc -layer "VRaySamplerInfo" -i $(TARGET_SAMPLES)/exr/rgb_scanline_pxr24_float_half.exr -pix_fmt rgba64le
 
+FATE_EXR += fate-exr-rgb-scanline-pxr24-half-uint32-13x9
+fate-exr-rgb-scanline-pxr24-half-uint32-13x9: CMD = framecrc -i $(TARGET_SAMPLES)/exr/rgb_scanline_pxr24_half_uint32_13x9.exr -pix_fmt rgba64le
+
 FATE_EXR += fate-exr-rgb-scanline-zip-half-float-l1
 fate-exr-rgb-scanline-zip-half-float-l1: CMD = framecrc -i $(TARGET_SAMPLES)/exr/rgb_scanline_zip_half_float.exr -pix_fmt rgb48le
 
@@ -248,6 +251,16 @@ FATE_EXR-$(call DEMDEC, IMAGE2, EXR) += $(FATE_EXR)
 
 FATE_IMAGE += $(FATE_EXR-yes)
 fate-exr: $(FATE_EXR-yes)
+
+FATE_JPG += fate-jpg-12bpp
+fate-jpg-12bpp: CMD = framecrc -idct simple -i $(TARGET_SAMPLES)/jpg/12bpp.jpg -f rawvideo -pix_fmt gray16le -vf setsar=sar=sar
+
+FATE_JPG += fate-jpg-jfif
+fate-jpg-jfif: CMD = framecrc -idct simple -i $(TARGET_SAMPLES)/jpg/20242.jpg
+
+FATE_JPG-$(call DEMDEC, IMAGE2, MJPEG) += $(FATE_JPG)
+FATE_IMAGE += $(FATE_JPG-yes)
+fate-jpg: $(FATE_JPG-yes)
 
 FATE_IMAGE-$(call DEMDEC, IMAGE2, QDRAW) += fate-pict
 fate-pict: CMD = framecrc -i $(TARGET_SAMPLES)/quickdraw/TRU256.PCT -pix_fmt rgb24

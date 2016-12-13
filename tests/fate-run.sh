@@ -129,6 +129,10 @@ framecrc(){
     ffmpeg "$@" -flags +bitexact -fflags +bitexact -f framecrc -
 }
 
+ffmetadata(){
+    ffmpeg "$@" -flags +bitexact -fflags +bitexact -f ffmetadata -
+}
+
 framemd5(){
     ffmpeg "$@" -flags +bitexact -fflags +bitexact -f framemd5 -
 }
@@ -190,6 +194,24 @@ enc_dec(){
         -f $dec_fmt -y $tdecfile || return
     do_md5sum $decfile
     tests/tiny_psnr $srcfile $decfile $cmp_unit $cmp_shift
+}
+
+transcode(){
+    src_fmt=$1
+    srcfile=$2
+    enc_fmt=$3
+    enc_opt=$4
+    final_decode=$5
+    encfile="${outdir}/${test}.${enc_fmt}"
+    test "$7" = -keep || cleanfiles="$cleanfiles $encfile"
+    tsrcfile=$(target_path $srcfile)
+    tencfile=$(target_path $encfile)
+    ffmpeg -f $src_fmt $DEC_OPTS -i $tsrcfile $ENC_OPTS $enc_opt $FLAGS \
+        -f $enc_fmt -y $tencfile || return
+    do_md5sum $encfile
+    echo $(wc -c $encfile)
+    ffmpeg $DEC_OPTS -i $encfile $ENC_OPTS $FLAGS $final_decode \
+        -f framecrc - || return
 }
 
 lavffatetest(){

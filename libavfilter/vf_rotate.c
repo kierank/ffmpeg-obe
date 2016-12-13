@@ -522,7 +522,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     }
     av_frame_copy_props(out, in);
 
-    rot->var_values[VAR_N] = inlink->frame_count;
+    rot->var_values[VAR_N] = inlink->frame_count_out;
     rot->var_values[VAR_T] = TS2T(in->pts, inlink->time_base);
     rot->angle = res = av_expr_eval(rot->angle_expr, rot->var_values, rot);
 
@@ -553,7 +553,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                           .plane = plane, .c = c, .s = s };
 
 
-        ctx->internal->execute(ctx, filter_slice, &td, NULL, FFMIN(outh, ctx->graph->nb_threads));
+        ctx->internal->execute(ctx, filter_slice, &td, NULL, FFMIN(outh, ff_filter_get_nb_threads(ctx)));
     }
 
     av_frame_free(&in);
