@@ -1915,62 +1915,62 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
     [AV_PIX_FMT_BAYER_BGGR8] = {
         .name = "bayer_bggr8",
         BAYER8_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_BGGR16LE] = {
         .name = "bayer_bggr16le",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_BGGR16BE] = {
         .name = "bayer_bggr16be",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_RGGB8] = {
         .name = "bayer_rggb8",
         BAYER8_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_RGGB16LE] = {
         .name = "bayer_rggb16le",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_RGGB16BE] = {
         .name = "bayer_rggb16be",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_GBRG8] = {
         .name = "bayer_gbrg8",
         BAYER8_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_GBRG16LE] = {
         .name = "bayer_gbrg16le",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_GBRG16BE] = {
         .name = "bayer_gbrg16be",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_GRBG8] = {
         .name = "bayer_grbg8",
         BAYER8_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_GRBG16LE] = {
         .name = "bayer_grbg16le",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_BAYER_GRBG16BE] = {
         .name = "bayer_grbg16be",
         BAYER16_DESC_COMMON
-        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB,
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BAYER,
     },
     [AV_PIX_FMT_NV16] = {
         .name = "nv16",
@@ -2158,6 +2158,10 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_PLANAR |
                  AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_ALPHA,
     },
+    [AV_PIX_FMT_D3D11] = {
+        .name = "d3d11",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
 };
 #if FF_API_PLUS1_MINUS1
 FF_ENABLE_DEPRECATION_WARNINGS
@@ -2183,6 +2187,7 @@ static const char *color_primaries_names[AVCOL_PRI_NB] = {
     [AVCOL_PRI_SMPTE428] = "smpte428",
     [AVCOL_PRI_SMPTE431] = "smpte431",
     [AVCOL_PRI_SMPTE432] = "smpte432",
+    [AVCOL_PRI_JEDEC_P22] = "jedec-p22",
 };
 
 static const char *color_transfer_names[] = {
@@ -2216,7 +2221,7 @@ static const char *color_space_names[] = {
     [AVCOL_SPC_BT470BG] = "bt470bg",
     [AVCOL_SPC_SMPTE170M] = "smpte170m",
     [AVCOL_SPC_SMPTE240M] = "smpte240m",
-    [AVCOL_SPC_YCOCG] = "ycgco",
+    [AVCOL_SPC_YCGCO] = "ycgco",
     [AVCOL_SPC_BT2020_NCL] = "bt2020nc",
     [AVCOL_SPC_BT2020_CL] = "bt2020c",
     [AVCOL_SPC_SMPTE2085] = "smpte2085",
@@ -2415,7 +2420,7 @@ void ff_check_pixfmt_descriptors(void){
             } else {
                 av_assert0(8*c->step >= c->depth);
             }
-            if (!strncmp(d->name, "bayer_", 6))
+            if (d->flags & AV_PIX_FMT_FLAG_BAYER)
                 continue;
             av_read_image_line(tmp, (void*)data, linesize, d, 0, 0, j, 2, 0);
             av_assert0(tmp[0] == 0 && tmp[1] == 0);
@@ -2506,8 +2511,16 @@ static int get_pix_fmt_score(enum AVPixelFormat dst_pix_fmt,
     int ret, loss, i, nb_components;
     int score = INT_MAX - 1;
 
-    if (dst_pix_fmt >= AV_PIX_FMT_NB || dst_pix_fmt <= AV_PIX_FMT_NONE)
-        return ~0;
+    if (!src_desc || !dst_desc)
+        return -4;
+
+    if ((src_desc->flags & AV_PIX_FMT_FLAG_HWACCEL) ||
+        (dst_desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+        if (dst_pix_fmt == src_pix_fmt)
+            return -1;
+        else
+            return -2;
+    }
 
     /* compute loss */
     *lossp = loss = 0;
@@ -2516,9 +2529,9 @@ static int get_pix_fmt_score(enum AVPixelFormat dst_pix_fmt,
         return INT_MAX;
 
     if ((ret = get_pix_fmt_depth(&src_min_depth, &src_max_depth, src_pix_fmt)) < 0)
-        return ret;
+        return -3;
     if ((ret = get_pix_fmt_depth(&dst_min_depth, &dst_max_depth, dst_pix_fmt)) < 0)
-        return ret;
+        return -3;
 
     src_color = get_color_type(src_desc);
     dst_color = get_color_type(dst_desc);
@@ -2620,21 +2633,27 @@ enum AVPixelFormat av_find_best_pix_fmt_of_2(enum AVPixelFormat dst_pix_fmt1, en
     const AVPixFmtDescriptor *desc2 = av_pix_fmt_desc_get(dst_pix_fmt2);
     int score1, score2;
 
-    loss_mask= loss_ptr?~*loss_ptr:~0; /* use loss mask if provided */
-    if(!has_alpha)
-        loss_mask &= ~FF_LOSS_ALPHA;
-
-    score1 = get_pix_fmt_score(dst_pix_fmt1, src_pix_fmt, &loss1, loss_mask);
-    score2 = get_pix_fmt_score(dst_pix_fmt2, src_pix_fmt, &loss2, loss_mask);
-
-    if (score1 == score2) {
-        if(av_get_padded_bits_per_pixel(desc2) != av_get_padded_bits_per_pixel(desc1)) {
-            dst_pix_fmt = av_get_padded_bits_per_pixel(desc2) < av_get_padded_bits_per_pixel(desc1) ? dst_pix_fmt2 : dst_pix_fmt1;
-        } else {
-            dst_pix_fmt = desc2->nb_components < desc1->nb_components ? dst_pix_fmt2 : dst_pix_fmt1;
-        }
+    if (!desc1) {
+        dst_pix_fmt = dst_pix_fmt2;
+    } else if (!desc2) {
+        dst_pix_fmt = dst_pix_fmt1;
     } else {
-        dst_pix_fmt = score1 < score2 ? dst_pix_fmt2 : dst_pix_fmt1;
+        loss_mask= loss_ptr?~*loss_ptr:~0; /* use loss mask if provided */
+        if(!has_alpha)
+            loss_mask &= ~FF_LOSS_ALPHA;
+
+        score1 = get_pix_fmt_score(dst_pix_fmt1, src_pix_fmt, &loss1, loss_mask);
+        score2 = get_pix_fmt_score(dst_pix_fmt2, src_pix_fmt, &loss2, loss_mask);
+
+        if (score1 == score2) {
+            if(av_get_padded_bits_per_pixel(desc2) != av_get_padded_bits_per_pixel(desc1)) {
+                dst_pix_fmt = av_get_padded_bits_per_pixel(desc2) < av_get_padded_bits_per_pixel(desc1) ? dst_pix_fmt2 : dst_pix_fmt1;
+            } else {
+                dst_pix_fmt = desc2->nb_components < desc1->nb_components ? dst_pix_fmt2 : dst_pix_fmt1;
+            }
+        } else {
+            dst_pix_fmt = score1 < score2 ? dst_pix_fmt2 : dst_pix_fmt1;
+        }
     }
 
     if (loss_ptr)

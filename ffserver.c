@@ -495,20 +495,22 @@ static void start_children(FFServerStream *feed)
         return;
     }
 
-    pathname = av_strdup (my_program_name);
+    slash = strrchr(my_program_name, '/');
+    if (!slash) {
+        pathname = av_mallocz(sizeof("ffmpeg"));
+    } else {
+        pathname = av_mallocz(slash - my_program_name + sizeof("ffmpeg"));
+        if (pathname != NULL) {
+            memcpy(pathname, my_program_name, slash - my_program_name);
+        }
+    }
     if (!pathname) {
         http_log("Could not allocate memory for children cmd line\n");
         return;
     }
-   /* replace "ffserver" with "ffmpeg" in the path of current
-    * program. Ignore user provided path */
+   /* use "ffmpeg" in the path of current program. Ignore user provided path */
 
-    slash = strrchr(pathname, '/');
-    if (!slash)
-        slash = pathname;
-    else
-        slash++;
-    strcpy(slash, "ffmpeg");
+    strcat(pathname, "ffmpeg");
 
     for (; feed; feed = feed->next) {
 
@@ -3948,7 +3950,7 @@ void show_help_default(const char *opt, const char *arg)
 }
 
 static const OptionDef options[] = {
-#include "cmdutils_common_opts.h"
+    CMDUTILS_COMMON_OPTIONS
     { "n", OPT_BOOL, {(void *)&no_launch }, "enable no-launch mode" },
     { "d", 0, {(void*)opt_debug}, "enable debug mode" },
     { "f", HAS_ARG | OPT_STRING, {(void*)&config.filename }, "use configfile instead of /etc/ffserver.conf", "configfile" },

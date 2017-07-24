@@ -1,6 +1,5 @@
-include $(SUBDIR)../config.mak
-
 NAME    = avdevice
+DESC    = FFmpeg device handling library
 
 HEADERS = avdevice.h                                                    \
           version.h                                                     \
@@ -10,6 +9,7 @@ OBJS    = alldevices.o                                                  \
           utils.o                                                       \
 
 OBJS-$(HAVE_LIBC_MSVCRT)                 += file_open.o
+OBJS-$(CONFIG_SHARED)                    += reverse.o
 
 # input/output devices
 OBJS-$(CONFIG_ALSA_INDEV)                += alsa_dec.o alsa.o timefilter.o
@@ -47,8 +47,7 @@ OBJS-$(CONFIG_V4L2_INDEV)                += v4l2.o v4l2-common.o timefilter.o
 OBJS-$(CONFIG_V4L2_OUTDEV)               += v4l2enc.o v4l2-common.o
 OBJS-$(CONFIG_V4L_INDEV)                 += v4l.o
 OBJS-$(CONFIG_VFWCAP_INDEV)              += vfwcap.o
-OBJS-$(CONFIG_X11GRAB_INDEV)             += x11grab.o
-OBJS-$(CONFIG_X11GRAB_XCB_INDEV)         += xcbgrab.o
+OBJS-$(CONFIG_XCBGRAB_INDEV)             += xcbgrab.o
 OBJS-$(CONFIG_XV_OUTDEV)                 += xv.o
 
 # external libraries
@@ -67,7 +66,7 @@ SKIPHEADERS-$(CONFIG_FBDEV_OUTDEV)       += fbdev_common.h
 SKIPHEADERS-$(CONFIG_LIBPULSE)           += pulse_audio_common.h
 SKIPHEADERS-$(CONFIG_V4L2_INDEV)         += v4l2-common.h
 SKIPHEADERS-$(CONFIG_V4L2_OUTDEV)        += v4l2-common.h
-SKIPHEADERS-$(HAVE_ALSA_ASOUNDLIB_H)     += alsa.h
-SKIPHEADERS-$(HAVE_SNDIO_H)              += sndio.h
+SKIPHEADERS-$(HAVE_ALSA)                 += alsa.h
+SKIPHEADERS-$(HAVE_SNDIO)                += sndio.h
 
 TESTPROGS-$(CONFIG_JACK_INDEV)           += timefilter

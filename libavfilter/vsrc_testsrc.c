@@ -1309,8 +1309,8 @@ static void draw_bar(TestSourceContext *test, const uint8_t color[4],
 
     x = FFMIN(x, test->w - 1);
     y = FFMIN(y, test->h - 1);
-    w = FFMIN(w, test->w - x);
-    h = FFMIN(h, test->h - y);
+    w = FFMAX(FFMIN(w, test->w - x), 0);
+    h = FFMAX(FFMIN(h, test->h - y), 0);
 
     av_assert0(x + w <= test->w);
     av_assert0(y + h <= test->h);
@@ -1376,7 +1376,7 @@ static void smptebars_fill_picture(AVFilterContext *ctx, AVFrame *picref)
     int r_w, r_h, w_h, p_w, p_h, i, tmp, x = 0;
     const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(picref->format);
 
-    av_frame_set_colorspace(picref, AVCOL_SPC_BT470BG);
+    picref->colorspace = AVCOL_SPC_BT470BG;
 
     r_w = FFALIGN((test->w + 6) / 7, 1 << pixdesc->log2_chroma_w);
     r_h = FFALIGN(test->h * 2 / 3, 1 << pixdesc->log2_chroma_h);
@@ -1443,7 +1443,7 @@ static void smptehdbars_fill_picture(AVFilterContext *ctx, AVFrame *picref)
     int d_w, r_w, r_h, l_w, i, tmp, x = 0, y = 0;
     const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(picref->format);
 
-    av_frame_set_colorspace(picref, AVCOL_SPC_BT709);
+    picref->colorspace = AVCOL_SPC_BT709;
 
     d_w = FFALIGN(test->w / 8, 1 << pixdesc->log2_chroma_w);
     r_h = FFALIGN(test->h * 7 / 12, 1 << pixdesc->log2_chroma_h);

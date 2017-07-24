@@ -22,6 +22,10 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
+
+#define FF_INTERNAL_FIELDS 1
+#include "libavfilter/framequeue.h"
+
 #include "avfilter.h"
 #include "drawutils.h"
 #include "internal.h"
@@ -34,7 +38,7 @@
 #define PLANE_U 0x20
 #define PLANE_V 0x40
 
-typedef struct {
+typedef struct ExtractPlanesContext {
     const AVClass *class;
     int requested_planes;
     int map[4];
@@ -283,7 +287,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
         const int idx = s->map[i];
         AVFrame *out;
 
-        if (outlink->status)
+        if (outlink->status_in)
             continue;
 
         out = ff_get_video_buffer(outlink, outlink->w, outlink->h);

@@ -79,7 +79,7 @@ function ff_vp9_avg32_neon, export=1
         vrhadd.u8       q0,  q0,  q2
         vrhadd.u8       q1,  q1,  q3
         subs            r12, r12, #1
-        vst1.8          {q0, q1},  [r0, :128], r1
+        vst1.8          {q0,  q1},  [r0, :128], r1
         bne             1b
         bx              lr
 endfunc
@@ -209,7 +209,7 @@ endfunc
 @ Extract a vector from src1-src2 and src4-src5 (src1-src3 and src4-src6
 @ for size >= 16), and multiply-accumulate into dst1 and dst3 (or
 @ dst1-dst2 and dst3-dst4 for size >= 16)
-.macro extmla dst1, dst2, dst3, dst4, src1, src2, src3, src4, src5, src6, offset, size
+.macro extmla dst1, dst2, dst3, dst4, dst1d, dst3d, src1, src2, src3, src4, src5, src6, offset, size
         vext.8          q14, \src1, \src2, #(2*\offset)
         vext.8          q15, \src4, \src5, #(2*\offset)
 .if \size >= 16
@@ -219,14 +219,17 @@ endfunc
         vext.8          q6,  \src5, \src6, #(2*\offset)
         vmla_lane       \dst2,  q5,  \offset
         vmla_lane       \dst4,  q6,  \offset
-.else
+.elseif \size == 8
         vmla_lane       \dst1,  q14, \offset
         vmla_lane       \dst3,  q15, \offset
+.else
+        vmla_lane       \dst1d, d28, \offset
+        vmla_lane       \dst3d, d30, \offset
 .endif
 .endm
 @ The same as above, but don't accumulate straight into the
 @ destination, but use a temp register and accumulate with saturation.
-.macro extmulqadd dst1, dst2, dst3, dst4, src1, src2, src3, src4, src5, src6, offset, size
+.macro extmulqadd dst1, dst2, dst3, dst4, dst1d, dst3d, src1, src2, src3, src4, src5, src6, offset, size
         vext.8          q14, \src1, \src2, #(2*\offset)
         vext.8          q15, \src4, \src5, #(2*\offset)
 .if \size >= 16
@@ -236,15 +239,23 @@ endfunc
         vext.8          q6,  \src5, \src6, #(2*\offset)
         vmul_lane       q5,  q5,  \offset
         vmul_lane       q6,  q6,  \offset
-.else
+.elseif \size == 8
         vmul_lane       q14, q14, \offset
         vmul_lane       q15, q15, \offset
+.else
+        vmul_lane       d28, d28, \offset
+        vmul_lane       d30, d30, \offset
 .endif
+.if \size == 4
+        vqadd.s16       \dst1d, \dst1d, d28
+        vqadd.s16       \dst3d, \dst3d, d30
+.else
         vqadd.s16       \dst1,  \dst1,  q14
         vqadd.s16       \dst3,  \dst3,  q15
 .if \size >= 16
         vqadd.s16       \dst2,  \dst2,  q5
         vqadd.s16       \dst4,  \dst4,  q6
+.endif
 .endif
 .endm
 
@@ -308,13 +319,13 @@ function \type\()_8tap_\size\()h_\idx1\idx2
         vmul.s16        q2,  q9,  d0[0]
         vmul.s16        q4,  q12, d0[0]
 .endif
-        extmla          q1,  q2,  q3,  q4,  q8,  q9,  q10,  q11, q12, q13, 1,     \size
-        extmla          q1,  q2,  q3,  q4,  q8,  q9,  q10,  q11, q12, q13, 2,     \size
-        extmla          q1,  q2,  q3,  q4,  q8,  q9,  q10,  q11, q12, q13, \idx1, \size
-        extmla          q1,  q2,  q3,  q4,  q8,  q9,  q10,  q11, q12, q13, 5,     \size
-        extmla          q1,  q2,  q3,  q4,  q8,  q9,  q10,  q11, q12, q13, 6,     \size
-        extmla          q1,  q2,  q3,  q4,  q8,  q9,  q10,  q11, q12, q13, 7,     \size
-        extmulqadd      q1,  q2,  q3,  q4,  q8,  q9,  q10,  q11, q12, q13, \idx2, \size
+        extmla          q1,  q2,  q3,  q4,  d2,  d6,  q8,  q9,  q10, q11, q12, q13, 1,     \size
+        extmla          q1,  q2,  q3,  q4,  d2,  d6,  q8,  q9,  q10, q11, q12, q13, 2,     \size
+        extmla          q1,  q2,  q3,  q4,  d2,  d6,  q8,  q9,  q10, q11, q12, q13, \idx1, \size
+        extmla          q1,  q2,  q3,  q4,  d2,  d6,  q8,  q9,  q10, q11, q12, q13, 5,     \size
+        extmla          q1,  q2,  q3,  q4,  d2,  d6,  q8,  q9,  q10, q11, q12, q13, 6,     \size
+        extmla          q1,  q2,  q3,  q4,  d2,  d6,  q8,  q9,  q10, q11, q12, q13, 7,     \size
+        extmulqadd      q1,  q2,  q3,  q4,  d2,  d6,  q8,  q9,  q10, q11, q12, q13, \idx2, \size
 
         @ Round, shift and saturate
         vqrshrun.s16    d2,  q1,  #7
@@ -407,7 +418,7 @@ function ff_vp9_\type\()_\filter\()\size\()_h_neon, export=1
         add             r12, r12, 256*\offset
         cmp             r5,  #8
         add             r12, r12, r5, lsl #4
-        mov             r5, #\size
+        mov             r5,  #\size
 .if \size >= 16
         bge             \type\()_8tap_16h_34
         b               \type\()_8tap_16h_43
@@ -541,7 +552,7 @@ function \type\()_8tap_8v_\idx1\idx2
         sub             r2,  r2,  r3
         vld1.16         {q0},  [r12, :128]
 1:
-        mov             r12,  r4
+        mov             r12, r4
 
         loadl           q5,  q6,  q7
         loadl           q8,  q9,  q10, q11
