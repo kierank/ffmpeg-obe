@@ -1431,6 +1431,10 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
         }
     } // initialize horizontal stuff
 
+    // XXX ???
+    if (isAnyRGB(dstFormat))
+        c->needs_hyscale = 1;
+
     /* precalculate vertical scaler filter coefficients */
     {
         const int filterAlign = X86_MMX(cpu_flags)     ? 2 :
