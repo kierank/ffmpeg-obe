@@ -30,11 +30,10 @@
 #include "h2645_parse.h"
 
 int ff_h2645_extract_rbsp(const uint8_t *src, int length,
-                          H2645NAL *nal, int small_padding)
+                          H2645RBSP *rbsp, H2645NAL *nal, int small_padding)
 {
     int i, si, di;
     uint8_t *dst;
-    int64_t padding = small_padding ? 0 : MAX_MBPAIR_SIZE;
 
     nal->skipped_bytes = 0;
 #define STARTCODE_TEST                                                  \
@@ -91,11 +90,7 @@ int ff_h2645_extract_rbsp(const uint8_t *src, int length,
     } else if (i > length)
         i = length;
 
-    av_fast_padded_malloc(&nal->rbsp_buffer, &nal->rbsp_buffer_size,
-                          length + padding);
-    if (!nal->rbsp_buffer)
-        return AVERROR(ENOMEM);
-
+    nal->rbsp_buffer = &rbsp->rbsp_buffer[rbsp->rbsp_buffer_size];
     dst = nal->rbsp_buffer;
 
     memcpy(dst, src, i);
@@ -144,6 +139,8 @@ nsc:
     nal->size = di;
     nal->raw_data = src;
     nal->raw_size = si;
+    rbsp->rbsp_buffer_size += si;
+
     return si;
 }
 
@@ -253,7 +250,13 @@ int ff_h2645_packet_split(H2645Packet *pkt, const uint8_t *buf, int length,
 {
     int consumed, ret = 0;
     const uint8_t *next_avc = is_nalff ? buf : buf + length;
+    int64_t padding = small_padding ? 0 : MAX_MBPAIR_SIZE;
 
+    av_fast_padded_malloc(&pkt->rbsp.rbsp_buffer, &pkt->rbsp.rbsp_buffer_alloc_size, length + padding);
+    if (!pkt->rbsp.rbsp_buffer)
+        return AVERROR(ENOMEM);
+
+    pkt->rbsp.rbsp_buffer_size = 0;
     pkt->nb_nals = 0;
     while (length >= 4) {
         H2645NAL *nal;
@@ -326,7 +329,7 @@ int ff_h2645_packet_split(H2645Packet *pkt, const uint8_t *buf, int length,
         }
         nal = &pkt->nals[pkt->nb_nals];
 
-        consumed = ff_h2645_extract_rbsp(buf, extract_length, nal, small_padding);
+        consumed = ff_h2645_extract_rbsp(buf, extract_length, &pkt->rbsp, nal, small_padding);
         if (consumed < 0)
             return consumed;
 
@@ -372,9 +375,10 @@ void ff_h2645_packet_uninit(H2645Packet *pkt)
 {
     int i;
     for (i = 0; i < pkt->nals_allocated; i++) {
-        av_freep(&pkt->nals[i].rbsp_buffer);
         av_freep(&pkt->nals[i].skipped_bytes_pos);
     }
     av_freep(&pkt->nals);
     pkt->nals_allocated = 0;
+    av_freep(&pkt->rbsp.rbsp_buffer);
+    pkt->rbsp.rbsp_buffer_alloc_size = pkt->rbsp.rbsp_buffer_size = 0;
 }
