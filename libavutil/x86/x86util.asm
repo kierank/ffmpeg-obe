@@ -854,6 +854,29 @@
 %endif
 %endmacro
 
+%macro VPBROADCASTD 2 ; dst xmm/ymm, src m32/xmm
+%if cpuflag(avx2)
+    vpbroadcastd  %1, %2
+%elif cpuflag(avx) && sizeof%1 >= 32
+    %error vpbroadcastd not possible with ymm on avx1. try vbroadcastss
+%else
+    %ifnum sizeof%2         ; sse2 register
+        pshufd  %1, %2, q0000
+    %else                   ; sse memory
+        movd    %1, %2
+        pshufd  %1, %1, 0
+    %endif
+%endif
+%endmacro
+
+%macro VBROADCASTI128 2 ; dst xmm/ymm, src : 128bits val
+%if mmsize > 16
+    vbroadcasti128 %1, %2
+%else
+    mova           %1, %2
+%endif
+%endmacro
+
 %macro SHUFFLE_MASK_W 8
     %rep 8
         %if %1>=0x80
