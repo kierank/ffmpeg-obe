@@ -139,6 +139,9 @@ static const struct {
     #if CONFIG_COLORSPACE_FILTER
         { "vf_colorspace", checkasm_check_colorspace },
     #endif
+    #if CONFIG_HFLIP_FILTER
+        { "vf_hflip", checkasm_check_vf_hflip },
+    #endif
     #if CONFIG_INTERLACE_FILTER
         { "vf_interlace", checkasm_check_vf_interlace },
     #endif
