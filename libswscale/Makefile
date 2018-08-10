@@ -1,5 +1,3 @@
-include $(SUBDIR)../ffbuild/config.mak
-
 NAME = swscale
 
 HEADERS = swscale.h                                                     \
