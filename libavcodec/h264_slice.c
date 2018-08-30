@@ -1286,9 +1286,10 @@ static int h264_export_frame_props(H264Context *h)
     if (h->sei.a53_caption.buf_ref) {
         H264SEIA53Caption *a53 = &h->sei.a53_caption;
 
-        AVFrameSideData *sd = av_frame_new_side_data_from_buf(cur->f, AV_FRAME_DATA_A53_CC, a53->buf_ref);
-        if (!sd)
-            av_buffer_unref(&a53->buf_ref);
+        AVFrameSideData *sd = av_frame_new_side_data(cur->f, AV_FRAME_DATA_A53_CC, a53->buf_ref->size);
+        if (sd)
+            memcpy(sd->data, a53->buf_ref->data, a53->buf_ref->size);
+        av_buffer_unref(&a53->buf_ref);
         a53->buf_ref = NULL;
 
         h->avctx->properties |= FF_CODEC_PROPERTY_CLOSED_CAPTIONS;
