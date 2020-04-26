@@ -621,7 +621,7 @@ static int swscale(SwsContext *c, const uint8_t *src[],
 
                 if (!((dstY & chrSkipMask) || isGray(dstFormat))) {
                     if (yuv2nv12cX) {
-                        yuv2nv12cX(c, vChrFilter,
+                        yuv2nv12cX(dstFormat, c->chrDither8, vChrFilter,
                                    vChrFilterSize, chrUSrcPtr, chrVSrcPtr,
                                    dest[1], chrDstW);
                     } else if (vChrFilterSize == 1) {
