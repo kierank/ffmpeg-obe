@@ -444,6 +444,15 @@ INPUT_UV_FUNC(nv12, avx512icl);
 INPUT_UV_FUNC(nv21, avx512icl);
 INPUT_UV_FUNC(nv20BE, avx512);
 INPUT_Y_FUNC(bswap16, avx512);
+
+#define YUV2NV_DECL(fmt, opt) \
+void ff_yuv2 ## fmt ## cX_ ## opt(enum AVPixelFormat format, const uint8_t *dither, \
+                                  const int16_t *filter, int filterSize, \
+                                  const int16_t **u, const int16_t **v, \
+                                  uint8_t *dst, int dstWidth)
+
+YUV2NV_DECL(nv12, avx2);
+YUV2NV_DECL(nv21, avx2);
 #endif
 
 av_cold void ff_sws_init_swscale_x86(SwsContext *c)
@@ -807,6 +816,20 @@ switch(c->dstBpc){ \
         } else {
             ASSIGN_ICL_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
             ASSIGN_ICL_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
+        }
+    }
+
+    if (EXTERNAL_AVX2_FAST(cpu_flags)) {
+        switch (c->dstFormat) {
+        case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_NV16:
+            c->yuv2nv12cX = ff_yuv2nv12cX_avx2;
+            break;
+        case AV_PIX_FMT_NV21:
+            c->yuv2nv12cX = ff_yuv2nv21cX_avx2;
+            break;
+        default:
+            break;
         }
     }
 #endif
