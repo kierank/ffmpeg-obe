@@ -395,6 +395,8 @@ Optimization options (experts only):
   --disable-fma3           disable FMA3 optimizations
   --disable-fma4           disable FMA4 optimizations
   --disable-avx2           disable AVX2 optimizations
+  --disable-avx512         disable AVX-512 optimizations
+  --disable-avx512icl      disable AVX-512ICL optimizations
   --disable-aesni          disable AESNI optimizations
   --disable-armv5te        disable armv5te optimizations
   --disable-armv6          disable armv6 optimizations
@@ -1774,6 +1776,8 @@ ARCH_EXT_LIST_X86_SIMD="
     amd3dnowext
     avx
     avx2
+    avx512
+    avx512icl
     fma3
     fma4
     mmx
@@ -1820,6 +1824,7 @@ ARCH_FEATURES="
     local_aligned_32
     simd_align_16
     simd_align_32
+    simd_align_64
 "
 
 BUILTIN_LIST="
@@ -2306,6 +2311,8 @@ xop_deps="avx"
 fma3_deps="avx"
 fma4_deps="avx"
 avx2_deps="avx"
+avx512_deps="avx2"
+avx512icl_deps="avx512"
 
 mmx_external_deps="x86asm"
 mmx_inline_deps="inline_asm"
@@ -2324,6 +2331,7 @@ fast_clz_if_any="aarch64 alpha avr32 mips ppc x86"
 fast_unaligned_if_any="aarch64 ppc x86"
 simd_align_16_if_any="altivec neon sse"
 simd_align_32_if_any="avx"
+simd_align_64_if_any="avx512"
 
 # system capabilities
 symver_if_any="symver_asm_label symver_gnu_asm"
@@ -5535,6 +5543,8 @@ EOF
             elf*) enabled debug && append X86ASMFLAGS $x86asm_debug ;;
         esac
 
+        check_x86asm "vmovdqa32 [eax]{k1}{z}, zmm0"    || disable avx512_external
+        check_x86asm "vpdpwssds zmm31{k1}{z}, zmm29, zmm28" || disable avx512icl_external
         check_x86asm "vextracti128 xmm0, ymm0, 0"      || disable avx2_external
         check_x86asm "vpmacsdd xmm0, xmm1, xmm2, xmm3" || disable xop_external
         check_x86asm "vfmaddps ymm0, ymm1, ymm2, ymm3" || disable fma4_external
@@ -6635,6 +6645,9 @@ if enabled x86; then
     echo "SSSE3 enabled             ${ssse3-no}"
     echo "AESNI enabled             ${aesni-no}"
     echo "AVX enabled               ${avx-no}"
+    echo "AVX2 enabled              ${avx2-no}"
+    echo "AVX-512 enabled           ${avx512-no}"
+    echo "AVX-512ICL enabled        ${avx512icl-no}"
     echo "XOP enabled               ${xop-no}"
     echo "FMA3 enabled              ${fma3-no}"
     echo "FMA4 enabled              ${fma4-no}"
