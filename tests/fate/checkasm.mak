@@ -20,6 +20,7 @@ FATE_CHECKASM = fate-checkasm-aacpsdsp                                  \
                 fate-checkasm-synth_filter                              \
                 fate-checkasm-v210enc                                   \
                 fate-checkasm-vf_blend                                  \
+                fate-checkasm-vf_bwdif                                  \
                 fate-checkasm-vf_colorspace                             \
                 fate-checkasm-videodsp                                  \
                 fate-checkasm-vp8dsp                                    \
