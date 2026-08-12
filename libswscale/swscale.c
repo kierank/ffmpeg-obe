@@ -362,6 +362,16 @@ static int swscale(SwsContext *c, const uint8_t *src[],
     int should_dither                = is9_OR_10BPS(c->srcFormat) ||
                                        is16BPS(c->srcFormat);
     int lastDstY;
+    /* Copy the luma plane straight from the source instead of pushing it
+     * through the identity filter, but only when that really is all luma
+     * needs.  Skipping the horizontal pass also skips the alpha pass, and the
+     * copy does no format, depth or range conversion, so it may only be taken
+     * when none of those are wanted. */
+    const int lum_copy = !c->needs_hyscale && !c->needs_vyscale &&
+                         !c->lumToYV12 && !c->readLumPlanar &&
+                         !(CONFIG_SWSCALE_ALPHA && c->alpPixBuf) &&
+                         c->srcBpc == c->dstBpc &&
+                         c->srcRange == c->dstRange;
 
     /* vars which will change and which we need to store back in the context */
     int dstY         = c->dstY;
@@ -490,7 +500,7 @@ static int swscale(SwsContext *c, const uint8_t *src[],
         //Disable luma horizontal scaling for OBE until swscale is fixed
         y_src= src[0]+(lastInLumBuf + 1 - srcSliceY)*srcStride[0];
 
-        if(c->needs_hyscale || c->needs_vyscale){
+        if(!lum_copy){
             // Do horizontal scaling
             while (lastInLumBuf < lastLumSrcY) {
                 const uint8_t *src1[4] = {
@@ -598,7 +608,7 @@ static int swscale(SwsContext *c, const uint8_t *src[],
                     vChrFilter= (int16_t *)c->chrMmxFilter;
                 }
 
-                if(!c->needs_hyscale && !c->needs_vyscale){
+                if(lum_copy){
                     memcpy(dest[0], y_src, dstW*(c->dstBpc > 8 ? sizeof(uint16_t) : sizeof(uint8_t)));
                 } else if (vLumFilterSize == 1) {
                     yuv2plane1(lumSrcPtr[0], dest[0], dstW, c->lumDither8, 0);
