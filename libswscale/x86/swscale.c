@@ -315,6 +315,24 @@ SCALE_FUNCS_SSE(sse2);
 SCALE_FUNCS_SSE(ssse3);
 SCALE_FUNCS_SSE(sse4);
 
+/* 16 bit wide input only; an 8 bit avx2 hscale needs gather */
+#define SCALE_FUNCS16(filter_n, opt) \
+    SCALE_FUNC(filter_n,  9, 15, opt); \
+    SCALE_FUNC(filter_n, 10, 15, opt); \
+    SCALE_FUNC(filter_n, 12, 15, opt); \
+    SCALE_FUNC(filter_n, 14, 15, opt); \
+    SCALE_FUNC(filter_n, 16, 15, opt); \
+    SCALE_FUNC(filter_n,  9, 19, opt); \
+    SCALE_FUNC(filter_n, 10, 19, opt); \
+    SCALE_FUNC(filter_n, 12, 19, opt); \
+    SCALE_FUNC(filter_n, 14, 19, opt); \
+    SCALE_FUNC(filter_n, 16, 19, opt)
+
+#if ARCH_X86_64
+SCALE_FUNCS16(4, avx2);
+SCALE_FUNCS16(8, avx2);
+#endif
+
 #define VSCALEX_FUNC(size, opt) \
 void ff_yuv2planeX_ ## size ## _ ## opt(const int16_t *filter, int filterSize, \
                                         const int16_t **src, uint8_t *dest, int dstW, \
@@ -585,9 +603,39 @@ switch(c->dstBpc){ \
     }
 
 #if ARCH_X86_64
+    /* as ASSIGN_SCALE_FUNC2 minus the 8 bit input case, which has no avx2 version */
+#define ASSIGN_SCALE_FUNC2_16(hscalefn, filtersize, opt) do { \
+    if (c->srcBpc == 9) { \
+        hscalefn = c->dstBpc <= 14 ? ff_hscale9to15_ ## filtersize ## _ ## opt : \
+                                     ff_hscale9to19_ ## filtersize ## _ ## opt; \
+    } else if (c->srcBpc == 10) { \
+        hscalefn = c->dstBpc <= 14 ? ff_hscale10to15_ ## filtersize ## _ ## opt : \
+                                     ff_hscale10to19_ ## filtersize ## _ ## opt; \
+    } else if (c->srcBpc == 12) { \
+        hscalefn = c->dstBpc <= 14 ? ff_hscale12to15_ ## filtersize ## _ ## opt : \
+                                     ff_hscale12to19_ ## filtersize ## _ ## opt; \
+    } else if (c->srcBpc == 14 || ((c->srcFormat==AV_PIX_FMT_PAL8||isAnyRGB(c->srcFormat)) && av_pix_fmt_desc_get(c->srcFormat)->comp[0].depth_minus1<15)) { \
+        hscalefn = c->dstBpc <= 14 ? ff_hscale14to15_ ## filtersize ## _ ## opt : \
+                                     ff_hscale14to19_ ## filtersize ## _ ## opt; \
+    } else { /* c->srcBpc == 16 */ \
+        av_assert0(c->srcBpc == 16);\
+        hscalefn = c->dstBpc <= 14 ? ff_hscale16to15_ ## filtersize ## _ ## opt : \
+                                     ff_hscale16to19_ ## filtersize ## _ ## opt; \
+    } \
+} while (0)
+#define ASSIGN_AVX2_SCALE_FUNC(hscalefn, filtersize) \
+    switch (filtersize) { \
+    case 4: ASSIGN_SCALE_FUNC2_16(hscalefn, 4, avx2); break; \
+    case 8: ASSIGN_SCALE_FUNC2_16(hscalefn, 8, avx2); break; \
+    default: break; /* the X variants are load bound, ymm buys nothing */ \
+    }
     if (EXTERNAL_AVX2_FAST(cpu_flags)) {
         if (c->dstBpc == 8 && !c->use_mmx_vfilter)
             c->yuv2planeX = ff_yuv2planeX_8_avx2;
+        if (c->srcBpc > 8) {
+            ASSIGN_AVX2_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
+            ASSIGN_AVX2_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
+        }
     }
 #endif
 }
