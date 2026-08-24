@@ -208,7 +208,9 @@ static void randomize_src(uint16_t *src, int n, int bpc, int bits)
 
 static void check_hscale(void)
 {
-    static const int filter_sizes[] = { 4, 8, 12, 16, 32, 40 };
+    // 16 and 32 are whole 16 tap chunks, 24 and 40 leave an odd 8 tap one, and
+    // 20 and 28 are the same two cases with the X4 split tail on the end
+    static const int filter_sizes[] = { 4, 8, 12, 16, 20, 24, 28, 32, 40 };
     // 13 and 33 leave a pixel over for the tail of the wider scalers, 12 a
     // whole unit of 4, the rest nothing at all
     static const int dst_widths[] = { 8, 12, 13, 16, 33, 128, 144, 256, 512 };

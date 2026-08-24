@@ -331,6 +331,8 @@ SCALE_FUNCS_SSE(sse4);
 #if ARCH_X86_64
 SCALE_FUNCS16(4, avx2);
 SCALE_FUNCS16(8, avx2);
+SCALE_FUNCS16(X4, avx2);
+SCALE_FUNCS16(X8, avx2);
 #endif
 
 #define VSCALEX_FUNC(size, opt) \
@@ -627,7 +629,12 @@ switch(c->dstBpc){ \
     switch (filtersize) { \
     case 4: ASSIGN_SCALE_FUNC2_16(hscalefn, 4, avx2); break; \
     case 8: ASSIGN_SCALE_FUNC2_16(hscalefn, 8, avx2); break; \
-    default: break; /* the X variants are load bound, ymm buys nothing */ \
+    /* 12 taps has no whole 16 tap chunk to do, so it stays on ssse3 */ \
+    default: if (filtersize >= 16) { \
+                 if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx2); \
+                 else                ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx2); \
+             } \
+             break; \
     }
     if (EXTERNAL_AVX2_FAST(cpu_flags)) {
         if (c->dstBpc == 8 && !c->use_mmx_vfilter)

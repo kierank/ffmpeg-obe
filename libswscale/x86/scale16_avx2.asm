@@ -42,12 +42,14 @@ SECTION .text
 ;                                const int16_t *filter,
 ;                                const int32_t *filterPos, int filterSize);
 ;
-; Same contract as scale.asm, eight output pixels per iteration.  The taps of
-; neighbouring output pixels start at unrelated source positions, so a ymm of
-; source has to be built from two 128 bit loads; the filter rows on the other
-; hand are contiguous, and eight taps of two pixels (or four taps of four) are
-; exactly the 32 bytes one ymm operand wants.  That halves the pmaddwd and
-; phaddd count for the same number of loads, and no gather is needed.
+; Same contract as scale.asm.  The fixed 4 and 8 tap filters below do eight
+; output pixels per iteration; the arbitrary filterSize ones are further down.
+; The taps of neighbouring output pixels start at unrelated source positions,
+; so a ymm of source has to be built from two 128 bit loads; the filter rows on
+; the other hand are contiguous, and eight taps of two pixels (or four taps of
+; four) are exactly the 32 bytes one ymm operand wants.  That halves the
+; pmaddwd and phaddd count for the same number of loads, and no gather is
+; needed.
 ;
 ; The wide loop only runs while eight whole pixels are left.  The tail is the
 ; 128 bit code, so the read past dstW stays inside the three filterPos[] and
@@ -223,12 +225,135 @@ cglobal hscale%1to%2_%3_avx2, 6, 8, 10, pos0, dst, w, src, filter, fltpos, pos1,
     RET
 %endmacro
 
+;-----------------------------------------------------------------------------
+; The same for an arbitrary filterSize: two output pixels in flight, sixteen
+; taps of each per iteration.  A pixel row of the filter is contiguous along
+; the tap dimension, so both the source and the coefficients are one 32 byte
+; load, and the loop does twice the taps of the ssse3 one for the same four
+; memory operands.
+;
+; The loop part is filterSize-dlt taps, always a multiple of 8, so at most one
+; odd 8 tap chunk is left over; that is exactly filterSize & 8.  The X4 tail is
+; the ssse3 one unchanged: the last four taps of pixel 0 and the first four of
+; pixel 1 are one 16 byte filter load, and land in the layout the folded
+; accumulator already has.
+;-----------------------------------------------------------------------------
+
+; SCALE_FUNC16_X source_width, intermediate_nbits, filtersuffix
+%macro SCALE_FUNC16_X 3
+%ifidn %3, X4
+%define dlt 4
+%else ; X8
+%define dlt 0
+%endif
+cglobal hscale%1to%2_%3_avx2, 7, 10, 9, pos0, dst, w, srcmem, filter, fltpos, fltsize
+%define srcq      r7
+%define pos1q     r8
+%define srcend16q r9
+    movsxd        wq, wd
+    movsxd  fltsizeq, fltsized
+%if %1 == 16
+    mova          m6, [minshort_ymm]
+    mova          m7, [unicoeff_ymm]
+%endif
+%if %2 == 19
+    mova          m8, [max_19bit_ymm]
+%endif
+    lea   srcend16q, [srcmemq+fltsizeq*2-(dlt+16)*2] ; &src[filterSize-dlt-16]
+    lea      fltposq, [fltposq+wq*4]
+%if %2 == 15
+    lea         dstq, [dstq+wq*2]
+%else ; %2 == 19
+    lea         dstq, [dstq+wq*4]
+%endif
+    neg           wq
+
+.loop:
+    movsxd     pos0q, dword [fltposq+wq*4+0]   ; filterPos[0]
+    movsxd     pos1q, dword [fltposq+wq*4+4]   ; filterPos[1]
+    pxor          m4, m4
+    pxor          m5, m5
+    mov         srcq, srcmemq
+    cmp         srcq, srcend16q
+    jg .chunk8                                 ; fewer than 16 taps to loop over
+
+.innerloop:
+    movu          m0, [srcq+ pos0q     *2]     ; src[filterPos[0] + {0..15}]
+    movu          m1, [srcq+(pos1q+dlt)*2]     ; src[filterPos[1] + {0..15}]
+%if %1 == 16
+    psubw         m0, m6
+    psubw         m1, m6
+%endif
+    pmaddwd       m0, [filterq]
+    pmaddwd       m1, [filterq+(fltsizeq+dlt)*2]
+    paddd         m4, m0
+    paddd         m5, m1
+    add      filterq, 32
+    add         srcq, 32
+    cmp         srcq, srcend16q
+    jle .innerloop
+
+.chunk8:
+    test    fltsized, 8
+    jz .taps_done
+    ; 8 taps left.  The xmm loads leave the upper lane zeroed, so the 16 bytes
+    ; of filter the ymm operand takes from the next row multiply by nothing.
+    movu         xm0, [srcq+ pos0q     *2]
+    movu         xm1, [srcq+(pos1q+dlt)*2]
+%if %1 == 16
+    psubw        xm0, xm6
+    psubw        xm1, xm6
+%endif
+    pmaddwd       m0, [filterq]
+    pmaddwd       m1, [filterq+(fltsizeq+dlt)*2]
+    paddd         m4, m0
+    paddd         m5, m1
+    add      filterq, 16
+    add         srcq, 16
+
+.taps_done:
+    phaddd        m4, m5                       ; px0 pairs, px1 pairs, per lane
+    vextracti128 xm2, m4, 1
+    paddd        xm4, xm2                      ; fold the lanes together
+%if dlt == 4
+    sub        pos1q, fltsizeq                 ; split last 4 srcpx of dstpx[0]
+    movq         xm0, [srcq+ pos0q     *2]     ; and first 4 srcpx of dstpx[1]
+    movhps       xm0, [srcq+(pos1q+dlt)*2]
+%if %1 == 16
+    psubw        xm0, xm6
+%endif
+    pmaddwd      xm0, [filterq]
+    paddd        xm4, xm0
+%endif ; dlt == 4
+    lea      filterq, [filterq+(fltsizeq+dlt)*2]
+    phaddd       xm4, xm4                      ; dstpx[0], dstpx[1]
+
+%if %1 == 16
+    paddd        xm4, xm7
+%endif
+    psrad        xm4, 14 + %1 - %2
+%if %2 == 15
+    packssdw     xm4, xm4
+    movd [dstq+wq*2], xm4
+%else ; %2 == 19
+    PMINSD       xm4, xm8, xm2
+    movq [dstq+wq*4], xm4
+%endif ; %2 == 15/19
+    add           wq, 2
+    jl .loop
+    RET
+%endmacro
+
 ; SCALE_FUNCS16 source_width
 %macro SCALE_FUNCS16 1
-SCALE_FUNC16 %1, 15, 4
-SCALE_FUNC16 %1, 15, 8
-SCALE_FUNC16 %1, 19, 4
-SCALE_FUNC16 %1, 19, 8
+SCALE_FUNC16   %1, 15, 4
+SCALE_FUNC16   %1, 15, 8
+SCALE_FUNC16_X %1, 15, X4
+SCALE_FUNC16_X %1, 15, X8
+SCALE_FUNC16   %1, 19, 4
+SCALE_FUNC16   %1, 19, 8
+SCALE_FUNC16_X %1, 19, X4
+SCALE_FUNC16_X %1, 19, X8
 %endmacro
 
 INIT_YMM avx2
