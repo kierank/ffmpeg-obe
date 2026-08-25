@@ -369,6 +369,148 @@ cglobal yuv2planeX_8, 7, 8, 10, filter, fltsize, src, dst, w, dither, offset
     jg .tail
 .end:
     RET
+
+; 32 pixels per iteration.  The lane split leaves the accumulators holding
+; pixels 0-3|8-11 and 4-7|12-15, which is what packusdw wants: it puts them
+; back in order, so unlike the 8 bit case there is no lane fixup before the
+; store.  Two accumulator pairs are worth it because the source pointers and
+; the coefficient broadcast are then amortised over 32 pixels rather than 16 -
+; the inner loop is otherwise short of the load ports.  A third pair is not:
+; the unpacks already saturate the shuffle port at two pairs.
+;
+; The rounding offset and the upper clip come out of the existing xmm
+; constants with a broadcast, so nothing here needs 32 byte rodata.
+%macro yuv2planeX_avx2_fn 1
+cglobal yuv2planeX_%1, 5, 8, 12, filter, fltsize, src, dst, w
+    vpbroadcastd   m10, [yuv2yuvX_%1_start]
+    vpbroadcastw   m11, [yuv2yuvX_%1_upper]
+
+    xor             r5,  r5
+    cmp             wd,  32
+    jl .check16
+
+.pixelloop:
+    mova            m1,  m10
+    mova            m2,  m10
+    mova            m3,  m10
+    mova            m4,  m10
+    movsxd          r7,  fltsizem
+.filterloop:
+    mov             r6, [srcq+gprsize*r7-2*gprsize]
+    movu            m5, [r6+r5*2]
+    movu            m6, [r6+r5*2+mmsize]
+    mov             r6, [srcq+gprsize*r7-gprsize]
+    movu            m7, [r6+r5*2]
+    movu            m8, [r6+r5*2+mmsize]
+    vpbroadcastd    m0, [filterq+2*r7-4]    ; coeff[0], coeff[1]
+
+    punpcklwd       m9,  m5,  m7
+    punpckhwd       m5,  m7
+    pmaddwd         m9,  m0
+    pmaddwd         m5,  m0
+    paddd           m1,  m9
+    paddd           m2,  m5
+
+    punpcklwd       m9,  m6,  m8
+    punpckhwd       m6,  m8
+    pmaddwd         m9,  m0
+    pmaddwd         m6,  m0
+    paddd           m3,  m9
+    paddd           m4,  m6
+
+    sub             r7,  2
+    jg .filterloop
+
+    psrad           m1,  27 - %1
+    psrad           m2,  27 - %1
+    psrad           m3,  27 - %1
+    psrad           m4,  27 - %1
+    packusdw        m1,  m2                 ; px 0-15
+    packusdw        m3,  m4                 ; px 16-31
+    pminsw          m1,  m11
+    pminsw          m3,  m11
+    movu   [dstq+r5*2       ],  m1
+    movu   [dstq+r5*2+mmsize],  m3
+
+    add             r5,  32
+    sub             wd,  32
+    cmp             wd,  32
+    jge .pixelloop
+
+.check16:
+    cmp             wd,  16
+    jl .check8
+    ; wd < 32 here, so this runs at most once
+    mova            m1,  m10
+    mova            m2,  m10
+    movsxd          r7,  fltsizem
+.filterloop16:
+    mov             r6, [srcq+gprsize*r7-2*gprsize]
+    movu            m5, [r6+r5*2]
+    mov             r6, [srcq+gprsize*r7-gprsize]
+    movu            m7, [r6+r5*2]
+
+    vpbroadcastd    m0, [filterq+2*r7-4]
+    punpcklwd       m9,  m5,  m7
+    punpckhwd       m5,  m7
+    pmaddwd         m9,  m0
+    pmaddwd         m5,  m0
+    paddd           m1,  m9
+    paddd           m2,  m5
+
+    sub             r7,  2
+    jg .filterloop16
+
+    psrad           m1,  27 - %1
+    psrad           m2,  27 - %1
+    packusdw        m1,  m2
+    pminsw          m1,  m11
+    movu   [dstq+r5*2],  m1
+
+    add             r5,  16
+    sub             wd,  16
+
+.check8:
+    test            wd,  wd
+    jle .end
+
+    ; 1-15 pixels left, in units of 8 as the xmm functions write them
+.tail:
+    mova           xm1,  xm10
+    mova           xm2,  xm10
+    movsxd          r7,  fltsizem
+.tailfilterloop:
+    mov             r6, [srcq+gprsize*r7-2*gprsize]
+    movu           xm5, [r6+r5*2]
+    mov             r6, [srcq+gprsize*r7-gprsize]
+    movu           xm7, [r6+r5*2]
+
+    vpbroadcastd   xm0, [filterq+2*r7-4]
+    punpcklwd      xm9,  xm5,  xm7
+    punpckhwd      xm5,  xm7
+    pmaddwd        xm9,  xm0
+    pmaddwd        xm5,  xm0
+    paddd          xm1,  xm9
+    paddd          xm2,  xm5
+
+    sub             r7,  2
+    jg .tailfilterloop
+
+    psrad          xm1,  27 - %1
+    psrad          xm2,  27 - %1
+    packusdw       xm1,  xm2
+    pminsw         xm1,  xm11
+    movu   [dstq+r5*2], xm1
+
+    add             r5,  8
+    sub             wd,  8
+    jg .tail
+.end:
+    RET
+%endmacro
+
+yuv2planeX_avx2_fn  9
+yuv2planeX_avx2_fn 10
 %endif
 
 ; %1=outout-bpc, %2=alignment (u/a)

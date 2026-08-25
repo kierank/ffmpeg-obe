@@ -74,7 +74,29 @@ static void show_differences_8(const uint8_t *ref, const uint8_t *test, size_t n
     }
 }
 
-static void check_yuv2yuvX(int accurate)
+static int cmp_off_by_n_16(const uint16_t *ref, const uint16_t *test, size_t n, int accuracy)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (abs(ref[i] - test[i]) > accuracy)
+            return 1;
+    }
+    return 0;
+}
+
+static void show_differences_16(const uint16_t *ref, const uint16_t *test, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (ref[i] != test[i]) {
+            printf("first difference at %d: both %d, new %d\n",
+                   (int)i, ref[i], test[i]);
+            return;
+        }
+    }
+}
+
+static void check_yuv2yuvX(int accurate, int bpc, enum AVPixelFormat dstFormat)
 {
     struct SwsContext *c;
     int fsi, osi, isi, i, j;
@@ -91,6 +113,10 @@ static void check_yuv2yuvX(int accurate)
     // the only two offsets swscale.c ever passes, one per chroma plane
     static const int offsets[] = {0, 3};
     const char *accurate_str = (accurate) ? "accurate" : "approximate";
+    // only the 8 bit output has an mmx vfilter to dodge; the 9 and 10 bit
+    // functions are exact and take the plain filter in both rounding modes,
+    // so those can be compared against the C version directly
+    const int pixel_size = (bpc == 8) ? 1 : 2;
 
     declare_func_emms(AV_CPU_FLAG_MMX, void, const int16_t *filter,
                       int filterSize, const int16_t **src, uint8_t *dest,
@@ -117,8 +143,8 @@ static void check_yuv2yuvX(int accurate)
     if (sws_init_context(c, NULL, NULL) < 0)
         fail();
 
-    c->dstBpc = 8;
-    c->dstFormat = AV_PIX_FMT_YUV420P;
+    c->dstBpc = bpc;
+    c->dstFormat = dstFormat;
     ff_getSwsFunc(c);
     for(isi = 0; isi < FF_ARRAY_ELEMS(input_sizes); ++isi){
         dstW = input_sizes[isi];
@@ -150,34 +176,46 @@ static void check_yuv2yuvX(int accurate)
                     for(j = 0; j < 4; ++j)
                         vFilterData[i].coeff[j + 4] = filter_coeff[i];
                 }
-                if (check_func(c->yuv2planeX, "yuv2yuvX_8_%d_%d_%d_%s", filter_sizes[fsi], offset, dstW, accurate_str)) {
+                if (check_func(c->yuv2planeX, "yuv2yuvX_%d_%d_%d_%d_%s", bpc, filter_sizes[fsi], offset, dstW, accurate_str)) {
                     // use vFilterData for the mmx function
                     const int16_t *filter = c->use_mmx_vfilter ? (const int16_t*)vFilterData : &filter_coeff[0];
+                    int px      = dstW - offset;
+                    // the scalers work in units of 16 pixels and may run into the
+                    // last one, but no further
+                    int written = FFALIGN(px, 16);
                     memset(dst0, 0, LARGEST_INPUT_SIZE * sizeof(dst0[0]));
                     memset(dst1, 0, LARGEST_INPUT_SIZE * sizeof(dst1[0]));
 
-                    // We can't use call_ref here, because we don't know if use_mmx_vfilter was set for that
-                    // function or not, so we can't pass it the parameters correctly.
-                    yuv2planeX_8_ref(&filter_coeff[0], filter_sizes[fsi], src, (uint8_t*)dst0, dstW - offset, dither, offset);
-                    call_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, dstW - offset, dither, offset);
+                    if (bpc == 8) {
+                        // We can't use call_ref here, because we don't know if use_mmx_vfilter was set for that
+                        // function or not, so we can't pass it the parameters correctly.
+                        yuv2planeX_8_ref(&filter_coeff[0], filter_sizes[fsi], src, (uint8_t*)dst0, px, dither, offset);
+                        call_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, px, dither, offset);
 
-                    if (cmp_off_by_n_8((uint8_t*)dst0, (uint8_t*)dst1, dstW - offset, accurate ? 0 : 2)) {
-                        fail();
-                        printf("failed: yuv2yuvX_8_%d_%d_%d_%s\n", filter_sizes[fsi], offset, dstW, accurate_str);
-                        show_differences_8((uint8_t*)dst0, (uint8_t*)dst1, dstW - offset);
+                        if (cmp_off_by_n_8((uint8_t*)dst0, (uint8_t*)dst1, px, accurate ? 0 : 2)) {
+                            fail();
+                            printf("failed: yuv2yuvX_%d_%d_%d_%d_%s\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str);
+                            show_differences_8((uint8_t*)dst0, (uint8_t*)dst1, px);
+                        }
+                    } else {
+                        call_ref(filter, filter_sizes[fsi], src, (uint8_t*)dst0, px, dither, offset);
+                        call_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, px, dither, offset);
+
+                        if (cmp_off_by_n_16(dst0, dst1, px, 0)) {
+                            fail();
+                            printf("failed: yuv2yuvX_%d_%d_%d_%d_%s\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str);
+                            show_differences_16(dst0, dst1, px);
+                        }
                     }
-                    // the scalers work in units of 16 pixels and may run into the
-                    // last one, but no further
-                    if (cmp_off_by_n_8((uint8_t*)dst0 + FFALIGN(dstW - offset, 16),
-                                (uint8_t*)dst1 + FFALIGN(dstW - offset, 16),
-                                LARGEST_INPUT_SIZE * sizeof(dst0[0]) - FFALIGN(dstW - offset, 16),
-                                0)) {
+
+                    if (cmp_off_by_n_8((uint8_t*)dst0 + written * pixel_size, (uint8_t*)dst1 + written * pixel_size,
+                                       LARGEST_INPUT_SIZE * sizeof(dst0[0]) - written * pixel_size, 0)) {
                         fail();
-                        printf("failed: yuv2yuvX_8_%d_%d_%d_%s wrote past dstW\n", filter_sizes[fsi], offset, dstW, accurate_str);
+                        printf("failed: yuv2yuvX_%d_%d_%d_%d_%s wrote past dstW\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str);
                     }
 
                     if (dstW == LARGEST_INPUT_SIZE)
-                        bench_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, dstW - offset, dither, offset);
+                        bench_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, px, dither, offset);
                 }
                 av_freep(&src);
                 av_freep(&vFilterData);
@@ -191,7 +229,13 @@ static void check_yuv2yuvX(int accurate)
 
 void checkasm_check_sw_scale(void)
 {
-    check_yuv2yuvX(0);
-    check_yuv2yuvX(1);
+    check_yuv2yuvX(0, 8, AV_PIX_FMT_YUV420P);
+    check_yuv2yuvX(1, 8, AV_PIX_FMT_YUV420P);
     report("yuv2yuvX_8");
+    check_yuv2yuvX(0, 9, AV_PIX_FMT_YUV420P9LE);
+    check_yuv2yuvX(1, 9, AV_PIX_FMT_YUV420P9LE);
+    report("yuv2yuvX_9LE");
+    check_yuv2yuvX(0, 10, AV_PIX_FMT_YUV420P10LE);
+    check_yuv2yuvX(1, 10, AV_PIX_FMT_YUV420P10LE);
+    report("yuv2yuvX_10LE");
 }
