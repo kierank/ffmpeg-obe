@@ -52,6 +52,7 @@ void checkasm_check_jpeg2000dsp(void);
 void checkasm_check_llviddsp(void);
 void checkasm_check_pixblockdsp(void);
 void checkasm_check_sbrdsp(void);
+void checkasm_check_sw_scale(void);
 void checkasm_check_synth_filter(void);
 void checkasm_check_v210enc(void);
 void checkasm_check_vf_bwdif(void);

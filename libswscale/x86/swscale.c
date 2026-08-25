@@ -331,6 +331,9 @@ VSCALEX_FUNCS(sse2);
 VSCALEX_FUNCS(sse4);
 VSCALEX_FUNC(16, sse4);
 VSCALEX_FUNCS(avx);
+#if ARCH_X86_64
+VSCALEX_FUNC(8, avx2);
+#endif
 
 #define VSCALE_FUNC(size, opt) \
 void ff_yuv2plane1_ ## size ## _ ## opt(const int16_t *src, uint8_t *dst, int dstW, \
@@ -580,4 +583,11 @@ switch(c->dstBpc){ \
             break;
         }
     }
+
+#if ARCH_X86_64
+    if (EXTERNAL_AVX2_FAST(cpu_flags)) {
+        if (c->dstBpc == 8 && !c->use_mmx_vfilter)
+            c->yuv2planeX = ff_yuv2planeX_8_avx2;
+    }
+#endif
 }
