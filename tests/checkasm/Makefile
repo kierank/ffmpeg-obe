@@ -33,6 +33,11 @@ AVFILTEROBJS-$(CONFIG_COLORSPACE_FILTER) += vf_colorspace.o
 
 CHECKASMOBJS-$(CONFIG_AVFILTER) += $(AVFILTEROBJS-yes)
 
+# libswscale tests
+SWSCALEOBJS                             += sw_scale.o
+
+CHECKASMOBJS-$(CONFIG_SWSCALE)          += $(SWSCALEOBJS)
+
 AVUTILOBJS                              += fixed_dsp.o
 AVUTILOBJS                              += float_dsp.o
 
