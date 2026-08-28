@@ -638,3 +638,51 @@ switch(c->dstBpc){ \
     }
 #endif
 }
+
+#if ARCH_X86_64 && HAVE_AVX2_EXTERNAL
+#define PLANE_COPY_8TO16_PROTO(shift)                                        \
+void ff_plane_copy_8to16_ ## shift ## _avx2(uint16_t *dst,                   \
+                                            const uint8_t *src, int length); \
+void ff_plane_copy_8to16_shiftonly_ ## shift ## _avx2(uint16_t *dst,         \
+                                                      const uint8_t *src,    \
+                                                      int length)
+
+PLANE_COPY_8TO16_PROTO(1);
+PLANE_COPY_8TO16_PROTO(2);
+PLANE_COPY_8TO16_PROTO(4);
+PLANE_COPY_8TO16_PROTO(6);
+PLANE_COPY_8TO16_PROTO(8);
+
+/* The kernels take the shift as an immediate: the depth is what decides how
+ * many instructions a pixel costs, and one switch per line of a plane is
+ * nothing next to the line itself.  A destination depth with no kernel of its
+ * own falls back to C. */
+#define PLANE_COPY_8TO16_DISPATCH(fn, kernel)                                \
+static void fn(uint16_t *dst, const uint8_t *src, int length, int shift)     \
+{                                                                            \
+    switch (shift) {                                                         \
+    case 1: kernel ## _1_avx2(dst, src, length); break;                      \
+    case 2: kernel ## _2_avx2(dst, src, length); break;                      \
+    case 4: kernel ## _4_avx2(dst, src, length); break;                      \
+    case 6: kernel ## _6_avx2(dst, src, length); break;                      \
+    case 8: kernel ## _8_avx2(dst, src, length); break;                      \
+    default: kernel ## _c(dst, src, length, shift); break;                   \
+    }                                                                        \
+}
+
+PLANE_COPY_8TO16_DISPATCH(plane_copy_8to16_avx2, ff_plane_copy_8to16)
+PLANE_COPY_8TO16_DISPATCH(plane_copy_8to16_shiftonly_avx2,
+                          ff_plane_copy_8to16_shiftonly)
+#endif
+
+av_cold void ff_get_unscaled_swscale_x86(SwsContext *c)
+{
+#if ARCH_X86_64 && HAVE_AVX2_EXTERNAL
+    int cpu_flags = av_get_cpu_flags();
+
+    if (EXTERNAL_AVX2_FAST(cpu_flags)) {
+        c->planeCopy8to16          = plane_copy_8to16_avx2;
+        c->planeCopy8to16Shiftonly = plane_copy_8to16_shiftonly_avx2;
+    }
+#endif
+}
