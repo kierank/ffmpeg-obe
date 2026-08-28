@@ -608,6 +608,20 @@ typedef struct SwsContext {
     /// Color range conversion function for chroma planes if needed.
     void (*chrConvertRange)(int16_t *dst1, int16_t *dst2, int width);
 
+    /**
+     * Promote a line of 8 bit samples to a shift + 8 bit little endian one,
+     * replicating the high bits into the low ones.  Used by the unscaled
+     * planar copy, which is where a conversion that only changes the depth
+     * ends up.
+     */
+    void (*planeCopy8to16)(uint16_t *dst, const uint8_t *src, int length,
+                           int shift);
+    /**
+     * As planeCopy8to16, leaving the low bits clear.
+     */
+    void (*planeCopy8to16Shiftonly)(uint16_t *dst, const uint8_t *src,
+                                    int length, int shift);
+
     int needs_hyscale; ///< Set if there are luma planes to be converted.
     int needs_hcscale; ///< Set if there are chroma planes to be converted.
     int needs_vyscale; ///< Set if there are luma planes to be converted.
@@ -857,6 +871,12 @@ extern const AVClass sws_context_class;
 void ff_get_unscaled_swscale(SwsContext *c);
 void ff_get_unscaled_swscale_ppc(SwsContext *c);
 void ff_get_unscaled_swscale_arm(SwsContext *c);
+void ff_get_unscaled_swscale_x86(SwsContext *c);
+
+void ff_plane_copy_8to16_c(uint16_t *dst, const uint8_t *src, int length,
+                           int shift);
+void ff_plane_copy_8to16_shiftonly_c(uint16_t *dst, const uint8_t *src,
+                                     int length, int shift);
 
 /**
  * Return function pointer to fastest main scaler path function depending

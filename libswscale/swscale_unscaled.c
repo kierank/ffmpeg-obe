@@ -1439,7 +1439,24 @@ static int planarCopyWrapper(SwsContext *c, const uint8_t *src[],
                         DITHER_COPY(dstPtr, dstStride[plane], srcPtr2, srcStride[plane]/2, av_bswap16, )
                     }
                 } else if (src_depth == 8) {
-                    for (i = 0; i < height; i++) {
+                    /* Not the copy the name of this function promises: an
+                     * unscaled conversion between two planar formats of the
+                     * same subsampling comes here whatever the depths are, so
+                     * a plain promotion is the hot case.  The little endian
+                     * side of it goes through a line function the arch hooks
+                     * replace. */
+                    if (!isBE(c->dstFormat)) {
+                        void (*copy_line)(uint16_t *dst, const uint8_t *src,
+                                          int length, int shift) =
+                            shiftonly ? c->planeCopy8to16Shiftonly
+                                      : c->planeCopy8to16;
+
+                        for (i = 0; i < height; i++) {
+                            copy_line(dstPtr2, srcPtr, length, dst_depth - 8);
+                            dstPtr2 += dstStride[plane]/2;
+                            srcPtr  += srcStride[plane];
+                        }
+                    } else for (i = 0; i < height; i++) {
                         #define COPY816(w)\
                         if (shiftonly) {\
                             for (j = 0; j < length; j++)\
@@ -1449,11 +1466,7 @@ static int planarCopyWrapper(SwsContext *c, const uint8_t *src[],
                                 w(&dstPtr2[j], (srcPtr[j]<<(dst_depth-8)) |\
                                                (srcPtr[j]>>(2*8-dst_depth)));\
                         }
-                        if(isBE(c->dstFormat)){
-                            COPY816(AV_WB16)
-                        } else {
-                            COPY816(AV_WL16)
-                        }
+                        COPY816(AV_WB16)
                         dstPtr2 += dstStride[plane]/2;
                         srcPtr  += srcStride[plane];
                     }
@@ -1562,6 +1575,22 @@ static int planarCopyWrapper(SwsContext *c, const uint8_t *src[],
      (src_fmt == pix_fmt ## LE && dst_fmt == pix_fmt ## BE))
 
 
+void ff_plane_copy_8to16_c(uint16_t *dst, const uint8_t *src, int length,
+                           int shift)
+{
+    int j;
+    for (j = 0; j < length; j++)
+        AV_WL16(&dst[j], (src[j] << shift) | (src[j] >> (8 - shift)));
+}
+
+void ff_plane_copy_8to16_shiftonly_c(uint16_t *dst, const uint8_t *src,
+                                     int length, int shift)
+{
+    int j;
+    for (j = 0; j < length; j++)
+        AV_WL16(&dst[j], src[j] << shift);
+}
+
 void ff_get_unscaled_swscale(SwsContext *c)
 {
     const enum AVPixelFormat srcFormat = c->srcFormat;
@@ -1573,6 +1602,9 @@ void ff_get_unscaled_swscale(SwsContext *c)
     needsDither = isAnyRGB(dstFormat) &&
             c->dstFormatBpp < 24 &&
            (c->dstFormatBpp < c->srcFormatBpp || (!isAnyRGB(srcFormat)));
+
+    c->planeCopy8to16          = ff_plane_copy_8to16_c;
+    c->planeCopy8to16Shiftonly = ff_plane_copy_8to16_shiftonly_c;
 
     /* yv12_to_nv12 */
     if ((srcFormat == AV_PIX_FMT_YUV420P || srcFormat == AV_PIX_FMT_YUVA420P) &&
@@ -1759,6 +1791,8 @@ void ff_get_unscaled_swscale(SwsContext *c)
             c->swscale = planarCopyWrapper;
     }
 
+    if (ARCH_X86)
+        ff_get_unscaled_swscale_x86(c);
     if (ARCH_PPC)
         ff_get_unscaled_swscale_ppc(c);
 //     if (ARCH_ARM)
