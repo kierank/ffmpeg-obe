@@ -371,8 +371,89 @@ static void check_hscale(void)
 #undef MAX_FILTER_WIDTH
 }
 
+static void check_plane_copy_8to16(void)
+{
+#define LINE_PIXELS 1920
+    static const enum AVPixelFormat dst_formats[] = {
+        AV_PIX_FMT_YUV420P9LE,
+        AV_PIX_FMT_YUV420P10LE,
+        AV_PIX_FMT_YUV420P12LE,
+        AV_PIX_FMT_YUV420P14LE,
+        AV_PIX_FMT_YUV420P16LE,
+    };
+    // 15 leaves a whole vector's worth of scalar tail, 17 one pixel of it,
+    // 16 and 32 none, and 1 to 8 is shorter than a vector to start with.
+    // 961 is a 4:2:2 chroma line of an odd width picture.
+    static const int lengths[] = { 1, 8, 15, 16, 17, 31, 32, 960, 961, 1920 };
+
+    struct SwsContext *c;
+    int fi, si, li, oi, i;
+
+    LOCAL_ALIGNED_32(uint8_t, src, [LINE_PIXELS + 1]);
+    LOCAL_ALIGNED_32(uint16_t, dst0, [LINE_PIXELS + 17]);
+    LOCAL_ALIGNED_32(uint16_t, dst1, [LINE_PIXELS + 17]);
+
+    declare_func(void, uint16_t *dst, const uint8_t *src, int length,
+                 int shift);
+
+    for (i = 0; i < LINE_PIXELS + 1; i++)
+        src[i] = rnd() & 0xff;
+
+    c = sws_alloc_context();
+    if (sws_init_context(c, NULL, NULL) < 0)
+        fail();
+
+    for (fi = 0; fi < FF_ARRAY_ELEMS(dst_formats); fi++) {
+        enum AVPixelFormat dst_format = dst_formats[fi];
+        int depth = av_pix_fmt_desc_get(dst_format)->comp[0].depth_minus1 + 1;
+        int shift = depth - 8;
+
+        // the pointers do not depend on the formats, but this is the
+        // conversion that reaches them
+        c->srcFormat = AV_PIX_FMT_YUV420P;
+        c->dstFormat = dst_format;
+        ff_get_unscaled_swscale(c);
+
+        for (si = 0; si < 2; si++) {
+            void (*func)(uint16_t *, const uint8_t *, int, int) =
+                si ? c->planeCopy8to16Shiftonly : c->planeCopy8to16;
+
+            for (li = 0; li < FF_ARRAY_ELEMS(lengths); li++) {
+                int length = lengths[li];
+
+                // nothing here is aligned in the caller, so check that
+                for (oi = 0; oi < 2; oi++) {
+                    if (!check_func(func, "plane_copy_8to16%s_%d_len_%d_off_%d",
+                                    si ? "_shiftonly" : "", depth, length, oi))
+                        continue;
+
+                    memset(dst0, 0xa5, (LINE_PIXELS + 17) * sizeof(dst0[0]));
+                    memset(dst1, 0xa5, (LINE_PIXELS + 17) * sizeof(dst1[0]));
+
+                    call_ref(dst0 + oi, src + oi, length, shift);
+                    call_new(dst1 + oi, src + oi, length, shift);
+
+                    if (memcmp(dst0, dst1,
+                               (LINE_PIXELS + 17) * sizeof(dst0[0]))) {
+                        fail();
+                        printf("failed: plane_copy_8to16%s_%d_len_%d_off_%d\n",
+                               si ? "_shiftonly" : "", depth, length, oi);
+                    }
+
+                    if (length == LINE_PIXELS && !oi)
+                        bench_new(dst1, src, length, shift);
+                }
+            }
+        }
+    }
+    sws_freeContext(c);
+#undef LINE_PIXELS
+}
+
 void checkasm_check_sw_scale(void)
 {
+    check_plane_copy_8to16();
+    report("plane_copy_8to16");
     check_hscale();
     report("hscale");
     check_yuv2yuvX(0, 8, AV_PIX_FMT_YUV420P);
