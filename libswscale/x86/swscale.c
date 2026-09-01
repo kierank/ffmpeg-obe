@@ -315,7 +315,7 @@ SCALE_FUNCS_SSE(sse2);
 SCALE_FUNCS_SSE(ssse3);
 SCALE_FUNCS_SSE(sse4);
 
-/* 16 bit wide input only; an 8 bit avx2 hscale needs gather */
+/* 16 bit wide input; the 8 bit input functions are the 4 tap ones below */
 #define SCALE_FUNCS16(filter_n, opt) \
     SCALE_FUNC(filter_n,  9, 15, opt); \
     SCALE_FUNC(filter_n, 10, 15, opt); \
@@ -333,6 +333,14 @@ SCALE_FUNCS16(4, avx2);
 SCALE_FUNCS16(8, avx2);
 SCALE_FUNCS16(X4, avx2);
 SCALE_FUNCS16(X8, avx2);
+
+/* 8 bit input, where only the 4 tap filter is worth widening: the bytes of one
+ * output pixel are a single dword load, so the gain is in the arithmetic and
+ * in avx512icl's byte permute, not in the loads */
+SCALE_FUNC(4,  8, 15, avx2);
+SCALE_FUNC(4,  8, 19, avx2);
+SCALE_FUNC(4,  8, 15, avx512icl);
+SCALE_FUNC(4,  8, 19, avx512icl);
 #endif
 
 #define VSCALEX_FUNC(size, opt) \
@@ -636,13 +644,26 @@ switch(c->dstBpc){ \
              } \
              break; \
     }
+    /* 8 bit input, 4 taps: the only filter size the wide kernels cover */
+#define ASSIGN_8BIT_SCALE_FUNC(hscalefn, filtersize, opt) do { \
+    if (filtersize == 4) \
+        hscalefn = c->dstBpc <= 14 ? ff_hscale8to15_4_ ## opt : \
+                                     ff_hscale8to19_4_ ## opt; \
+} while (0)
     if (EXTERNAL_AVX2_FAST(cpu_flags)) {
         if (c->dstBpc == 8 && !c->use_mmx_vfilter)
             c->yuv2planeX = ff_yuv2planeX_8_avx2;
         if (c->srcBpc > 8) {
             ASSIGN_AVX2_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
             ASSIGN_AVX2_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
+        } else {
+            ASSIGN_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize, avx2);
+            ASSIGN_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize, avx2);
         }
+    }
+    if (EXTERNAL_AVX512ICL(cpu_flags) && c->srcBpc == 8) {
+        ASSIGN_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize, avx512icl);
+        ASSIGN_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize, avx512icl);
     }
 #endif
 }
