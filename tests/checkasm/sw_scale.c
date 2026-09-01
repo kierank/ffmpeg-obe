@@ -303,7 +303,12 @@ static void check_hscale(void)
                     for (i = 0; i < SRC_PIXELS + 3; i++)
                         filterPos[i] = i * step;
 
-                    if (!check_func(c->hcScale, "hscale_%d_to_%d__fs_%d_dstW_%d_step_%d",
+                    // the format has to be part of the name: two of the source
+                    // types are 16 bpc but dispatch to different functions, and
+                    // checkasm takes the last registered version as the
+                    // reference, so a shared name compares one against the other
+                    if (!check_func(c->hcScale, "hscale_%s_%d_to_%d__fs_%d_dstW_%d_step_%d",
+                                    av_get_pix_fmt_name(src_types[sti].fmt),
                                     src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
                                     width, dstW, step))
                         continue;
@@ -318,7 +323,8 @@ static void check_hscale(void)
 
                     if (memcmp(dst0, dst1, dstW * dst_size)) {
                         fail();
-                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%d\n",
+                        printf("failed: hscale_%s_%d_to_%d__fs_%d_dstW_%d_step_%d\n",
+                               av_get_pix_fmt_name(src_types[sti].fmt),
                                src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
                                width, dstW, step);
                     }
@@ -326,7 +332,8 @@ static void check_hscale(void)
                                (uint8_t*)dst1 + written * dst_size,
                                (SRC_PIXELS + 8) * sizeof(dst0[0]) - written * dst_size)) {
                         fail();
-                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%d wrote past dstW\n",
+                        printf("failed: hscale_%s_%d_to_%d__fs_%d_dstW_%d_step_%d wrote past dstW\n",
+                               av_get_pix_fmt_name(src_types[sti].fmt),
                                src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
                                width, dstW, step);
                     }
