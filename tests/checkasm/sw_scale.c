@@ -229,9 +229,14 @@ static void check_hscale(void)
         { 16, 14, AV_PIX_FMT_RGB24       },
     };
     static const int dst_bpcs[] = { 14, 16 };
+    // the step between the filter positions of neighbouring output pixels: 1 is
+    // a mild scale, which is what the widest kernels are written for, and 5
+    // spreads the taps of one iteration of the avx512 8 bit one over more than
+    // the 64 byte source window it loads, so its fallback is covered as well
+    static const int pos_steps[] = { 1, 5 };
 
     struct SwsContext *c;
-    int sti, fsi, dwi, bi, i, j;
+    int sti, fsi, dwi, bi, psi, i, j;
 
     // filter and filterPos carry the three entries of padding initFilter()
     // leaves for the scalers that read past dstW
@@ -245,9 +250,6 @@ static void check_hscale(void)
     declare_func_emms(AV_CPU_FLAG_MMX, void, struct SwsContext *c, int16_t *dst,
                       int dstW, const uint8_t *src, const int16_t *filter,
                       const int32_t *filterPos, int filterSize);
-
-    for (i = 0; i < SRC_PIXELS + 3; i++)
-        filterPos[i] = i;
 
     c = sws_alloc_context();
     if (sws_init_context(c, NULL, NULL) < 0)
@@ -287,14 +289,23 @@ static void check_hscale(void)
                 ff_getSwsFunc(c);
 
                 for (dwi = 0; dwi < FF_ARRAY_ELEMS(dst_widths); dwi++) {
+                for (psi = 0; psi < FF_ARRAY_ELEMS(pos_steps); psi++) {
                     int dstW = dst_widths[dwi];
+                    int step = pos_steps[psi];
                     // the scalers work in units of 4 pixels and may run into
                     // the last one, but no further
                     int written = FFALIGN(dstW, 4);
 
-                    if (!check_func(c->hcScale, "hscale_%d_to_%d__fs_%d_dstW_%d",
+                    // the taps of the last pixel, and what the widest kernels
+                    // read past them, have to stay inside src
+                    if (step * (dstW - 1) + MAX_FILTER_WIDTH + 4 > SRC_SAMPLES)
+                        continue;
+                    for (i = 0; i < SRC_PIXELS + 3; i++)
+                        filterPos[i] = i * step;
+
+                    if (!check_func(c->hcScale, "hscale_%d_to_%d__fs_%d_dstW_%d_step_%d",
                                     src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
-                                    width, dstW))
+                                    width, dstW, step))
                         continue;
 
                     memset(dst0, 0, (SRC_PIXELS + 8) * sizeof(dst0[0]));
@@ -307,22 +318,23 @@ static void check_hscale(void)
 
                     if (memcmp(dst0, dst1, dstW * dst_size)) {
                         fail();
-                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d\n",
+                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%d\n",
                                src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
-                               width, dstW);
+                               width, dstW, step);
                     }
                     if (memcmp((uint8_t*)dst0 + written * dst_size,
                                (uint8_t*)dst1 + written * dst_size,
                                (SRC_PIXELS + 8) * sizeof(dst0[0]) - written * dst_size)) {
                         fail();
-                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d wrote past dstW\n",
+                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%d wrote past dstW\n",
                                src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
-                               width, dstW);
+                               width, dstW, step);
                     }
 
                     if (dstW == SRC_PIXELS)
                         bench_new(c, (int16_t*)dst1, dstW, (const uint8_t*)src,
                                   filter, filterPos, width);
+                }
                 }
             }
         }
