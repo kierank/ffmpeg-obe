@@ -513,6 +513,123 @@ yuv2planeX_avx2_fn  9
 yuv2planeX_avx2_fn 10
 %endif
 
+%if ARCH_X86_64 && HAVE_AVX512ICL_EXTERNAL
+INIT_ZMM avx512icl
+
+; 64 pixels per iteration.  Zen 4 splits a 512 bit operation into two 256 bit
+; ones, so the width on its own buys little beyond the loop overhead; what pays
+; here is vpdpwssd, which is the pmaddwd and the paddd of the avx2 inner loop in
+; one instruction.  It is the non-saturating form, so it is bit exact with them.
+;
+; The lane split works out as it does at 256 bits: the accumulators hold pixels
+; 0-3|8-11|16-19|24-27 and 4-7|12-15|20-23|28-31 of each 32, and packusdw is
+; per lane too, so it puts them back in order with no fixup.
+;
+; The tail is one masked pass instead of the 16 and 8 pixel ladder, so it writes
+; exactly dstW pixels rather than running into the next unit of 16.
+%macro yuv2planeX_avx512icl_fn 1
+cglobal yuv2planeX_%1, 5, 10, 16, filter, fltsize, src, dst, w
+    vpbroadcastd   m14, [yuv2yuvX_%1_start]
+    vpbroadcastw   m15, [yuv2yuvX_%1_upper]
+
+    xor             r5,  r5
+    cmp             wd,  64
+    jl .tail
+
+.pixelloop:
+    mova            m1,  m14
+    mova            m2,  m14
+    mova            m3,  m14
+    mova            m4,  m14
+    movsxd          r7,  fltsizem
+.filterloop:
+    mov             r6, [srcq+gprsize*r7-2*gprsize]
+    movu            m5, [r6+r5*2]
+    movu            m6, [r6+r5*2+mmsize]
+    mov             r6, [srcq+gprsize*r7-gprsize]
+    movu            m7, [r6+r5*2]
+    movu            m8, [r6+r5*2+mmsize]
+    vpbroadcastd    m0, [filterq+2*r7-4]    ; coeff[0], coeff[1]
+
+    punpcklwd       m9,  m5,  m7
+    punpckhwd       m5,  m7
+    vpdpwssd        m1,  m9,  m0
+    vpdpwssd        m2,  m5,  m0
+
+    punpcklwd       m9,  m6,  m8
+    punpckhwd       m6,  m8
+    vpdpwssd        m3,  m9,  m0
+    vpdpwssd        m4,  m6,  m0
+
+    sub             r7,  2
+    jg .filterloop
+
+    psrad           m1,  27 - %1
+    psrad           m2,  27 - %1
+    psrad           m3,  27 - %1
+    psrad           m4,  27 - %1
+    packusdw        m1,  m2                 ; px 0-31
+    packusdw        m3,  m4                 ; px 32-63
+    pminsw          m1,  m15
+    pminsw          m3,  m15
+    movu   [dstq+r5*2       ],  m1
+    movu   [dstq+r5*2+mmsize],  m3
+
+    add             r5,  64
+    sub             wd,  64
+    cmp             wd,  64
+    jge .pixelloop
+
+    test            wd,  wd
+    jle .end
+
+    ; 1-63 pixels left, or dstW < 64 to start with: at most two masked passes
+.tail:
+    mov            r8d,  wd
+    cmp            r8d,  32
+    jl .have_count
+    mov            r8d,  32
+.have_count:
+    ; the mask is per word, and rax is x86inc's r6, which the loop below needs
+    mov             r9, -1
+    bzhi            r9,  r9, r8
+    kmovd           k1,  r9d
+
+    mova            m1,  m14
+    mova            m2,  m14
+    movsxd          r7,  fltsizem
+.tailfilterloop:
+    mov             r6, [srcq+gprsize*r7-2*gprsize]
+    vmovdqu16 m5{k1}{z}, [r6+r5*2]
+    mov             r6, [srcq+gprsize*r7-gprsize]
+    vmovdqu16 m7{k1}{z}, [r6+r5*2]
+
+    vpbroadcastd    m0, [filterq+2*r7-4]
+    punpcklwd       m9,  m5,  m7
+    punpckhwd       m5,  m7
+    vpdpwssd        m1,  m9,  m0
+    vpdpwssd        m2,  m5,  m0
+
+    sub             r7,  2
+    jg .tailfilterloop
+
+    psrad           m1,  27 - %1
+    psrad           m2,  27 - %1
+    packusdw        m1,  m2
+    pminsw          m1,  m15
+    vmovdqu16 [dstq+r5*2]{k1}, m1
+
+    add             r5,  32
+    sub             wd,  32
+    jg .tail
+.end:
+    RET
+%endmacro
+
+yuv2planeX_avx512icl_fn  9
+yuv2planeX_avx512icl_fn 10
+%endif
+
 ; %1=outout-bpc, %2=alignment (u/a)
 %macro yuv2plane1_mainloop 2
 .loop_%2:
