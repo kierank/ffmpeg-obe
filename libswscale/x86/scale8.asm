@@ -72,11 +72,11 @@ SECTION .text
     movsxd     pos0q, dword [fltposq+cntq*4+%2*4+ 0]
     movsxd     pos1q, dword [fltposq+cntq*4+%2*4+ 4]
     movd        xm%1, [srcq+pos0q]
-    pinsrd      xm%1, [srcq+pos1q], 1
+    pinsrd      xm%1, xm%1, [srcq+pos1q], 1
     movsxd     pos0q, dword [fltposq+cntq*4+%2*4+ 8]
     movsxd     pos1q, dword [fltposq+cntq*4+%2*4+12]
-    pinsrd      xm%1, [srcq+pos0q], 2
-    pinsrd      xm%1, [srcq+pos1q], 3
+    pinsrd      xm%1, xm%1, [srcq+pos0q], 2
+    pinsrd      xm%1, xm%1, [srcq+pos1q], 3
     pmovzxbw     m%1, xm%1
 %endmacro
 
@@ -87,11 +87,11 @@ SECTION .text
     movsxd     pos0q, dword [fltposq+cntq*4+ 0]
     movsxd     pos1q, dword [fltposq+cntq*4+ 4]
     movd         xm0, [srcq+pos0q]
-    pinsrd       xm0, [srcq+pos1q], 1
+    pinsrd       xm0, xm0, [srcq+pos1q], 1
     movsxd     pos0q, dword [fltposq+cntq*4+ 8]
     movsxd     pos1q, dword [fltposq+cntq*4+12]
     movd         xm1, [srcq+pos0q]
-    pinsrd       xm1, [srcq+pos1q], 1
+    pinsrd       xm1, xm1, [srcq+pos1q], 1
     pmovzxbw     xm0, xm0
     pmovzxbw     xm1, xm1
     pmaddwd      xm0, [filterq+ 0]
