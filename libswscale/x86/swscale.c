@@ -331,6 +331,9 @@ SCALE_FUNCS_SSE(sse4);
 #if ARCH_X86_64
 SCALE_FUNCS16(4, avx2);
 SCALE_FUNCS16(8, avx2);
+/* only the 4 tap filter, which is the size whose whole iteration fits in a 64
+ * sample window; the wider ones stay on avx2 */
+SCALE_FUNCS16(4, avx512icl);
 #endif
 
 #define VSCALEX_FUNC(size, opt) \
@@ -634,6 +637,14 @@ switch(c->dstBpc){ \
         if (c->srcBpc > 8) {
             ASSIGN_AVX2_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
             ASSIGN_AVX2_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
+        }
+    }
+    if (EXTERNAL_AVX512ICL(cpu_flags)) {
+        if (c->srcBpc > 8) {
+            if (c->hLumFilterSize == 4)
+                ASSIGN_SCALE_FUNC2_16(c->hyScale, 4, avx512icl);
+            if (c->hChrFilterSize == 4)
+                ASSIGN_SCALE_FUNC2_16(c->hcScale, 4, avx512icl);
         }
     }
 #endif

@@ -12,3 +12,4 @@ X86ASM-OBJS                     += x86/input.o                          \
                                    x86/output.o                         \
                                    x86/scale.o                          \
                                    x86/scale16_avx2.o                   \
+                                   x86/scale16_avx512.o                 \
