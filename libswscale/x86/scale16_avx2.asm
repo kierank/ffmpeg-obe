@@ -80,7 +80,7 @@ SECTION .text
 
 ; SCALE_FUNC16 source_width, intermediate_nbits, filtersize
 %macro SCALE_FUNC16 3
-cglobal hscale%1to%2_%3_avx2, 6, 8, 10, pos0, dst, w, src, filter, fltpos, pos1, cnt
+cglobal hscale%1to%2_%3, 6, 8, 10, pos0, dst, w, src, filter, fltpos, pos1, cnt
     movsxd        wq, wd
     xor         cntq, cntq
 %if %1 == 16
@@ -246,7 +246,7 @@ cglobal hscale%1to%2_%3_avx2, 6, 8, 10, pos0, dst, w, src, filter, fltpos, pos1,
 %else ; X8
 %define dlt 0
 %endif
-cglobal hscale%1to%2_%3_avx2, 7, 10, 9, pos0, dst, w, srcmem, filter, fltpos, fltsize
+cglobal hscale%1to%2_%3, 7, 10, 9, pos0, dst, w, srcmem, filter, fltpos, fltsize
 %define srcq      r7
 %define pos1q     r8
 %define srcend16q r9

@@ -122,7 +122,7 @@ INIT_YMM avx2
 
 ; SCALE8_FUNC intermediate_nbits
 %macro SCALE8_FUNC 1
-cglobal hscale8to%1_4_avx2, 6, 8, 6, pos0, dst, w, src, filter, fltpos, pos1, cnt
+cglobal hscale8to%1_4, 6, 8, 6, pos0, dst, w, src, filter, fltpos, pos1, cnt
     movsxd        wq, wd
     xor         cntq, cntq
 %if %1 == 19
@@ -201,7 +201,7 @@ INIT_ZMM avx512icl
 
 ; SCALE8_FUNC_ICL intermediate_nbits
 %macro SCALE8_FUNC_ICL 1
-cglobal hscale8to%1_4_avx512icl, 6, 11, 12, pos0, dst, w, src, filter, fltpos, pos1, cnt, winbase, hibase, zero
+cglobal hscale8to%1_4, 6, 11, 12, pos0, dst, w, src, filter, fltpos, pos1, cnt, winbase, hibase, zero
     movsxd        wq, wd
     xor         cntq, cntq
     xor        zerod, zerod
