@@ -63,6 +63,17 @@ typedef enum {
     SEI_FPA_TYPE_2D                  = 6,
 } SEI_FpaType;
 
+typedef struct H264SEITimeCode {
+    /* When not continuously receiving full timecodes, we have to reference
+       the previous timecode received */
+    int full;
+    int frame;
+    int seconds;
+    int minutes;
+    int hours;
+    int dropframe;
+} H264SEITimeCode;
+
 typedef struct H264SEIPictureTiming {
     int present;
     SEI_PicStructType pic_struct;
@@ -83,6 +94,16 @@ typedef struct H264SEIPictureTiming {
      * cpb_removal_delay in picture timing SEI message, see H.264 C.1.2
      */
     int cpb_removal_delay;
+
+    /**
+     * Maximum three timecodes in a pic_timing SEI.
+     */
+    H264SEITimeCode timecode[3];
+
+    /**
+     * Number of timecode in use
+     */
+    int timecode_cnt;
 } H264SEIPictureTiming;
 
 typedef struct H264SEIAFD {

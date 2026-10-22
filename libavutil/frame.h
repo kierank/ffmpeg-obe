@@ -134,6 +134,14 @@ enum AVFrameSideDataType {
      * the form of the AVContentLightMetadata struct.
      */
     AV_FRAME_DATA_CONTENT_LIGHT_LEVEL,
+
+    /**
+     * Timecode which conforms to SMPTE ST 12-1. The data is an array of 4 uint32_t
+     * where the first uint32_t describes how many (1-3) of the other timecodes are used.
+     * The timecode format is described in the av_timecode_get_smpte_from_framenum()
+     * function in libavutil/timecode.c.
+     */
+    AV_FRAME_DATA_S12M_TIMECODE,
 };
 
 enum AVActiveFormatDescription {
