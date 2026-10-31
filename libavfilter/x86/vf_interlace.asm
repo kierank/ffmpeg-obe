@@ -24,9 +24,9 @@
 
 %include "libavutil/x86/x86util.asm"
 
-SECTION_RODATA
+SECTION_RODATA 32
 
-pw_4: times 8 dw 4
+pw_4: times 16 dw 4
 
 SECTION .text
 
