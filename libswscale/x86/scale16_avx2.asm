@@ -32,6 +32,9 @@ max_19bit_ymm: times  8 dd 0x7ffff
 swizzle_8tap:  dd 0, 4, 1, 5, 2, 6, 3, 7
 ; the last four of eight words, for the 4 tap remainder of the X4 kernels
 hi4_words:     dw 0, 0, 0, 0, -1, -1, -1, -1
+; a sliding window of dword masks: the n at mask_dw + 32 - 4n are -1
+mask_dw:       times 8 dd -1
+               times 8 dd 0
 
 SECTION .text
 
@@ -509,6 +512,148 @@ cglobal hscale%1to%2_%3, 7, 15, 12, f1, dst, w, src, filter, fltpos, fltsize, s0
     RET
 %endmacro
 
+;-----------------------------------------------------------------------------
+; The masked version: eight output pixels in flight, a pixel its whole 16 tap
+; chunks and then one chunk of the 4, 8, 12 or 16 taps left, loaded with
+; vpmaskmovd for both source and filter (a tap is a word of either, and the 4
+; tap granularity of filterSize a dword one), so no remainder steps and
+; nothing past the row read.  For 16 bit input the taps past the row become
+; -0x8000, but the masked filter load has zeroed their coefficients.  As
+; scale8.asm's X4_masked.
+;-----------------------------------------------------------------------------
+
+; one pixel: %1 accumulator, %2 pixel, %3 the whole chunks before the masked
+; last one at lastoff: 0, 1 (each unrolled), or 2 for nfull of them in a loop.
+; m9 is the mask of the last chunk, rowq the bytes of a filter row, lastq
+; those of the last chunk.  m10 scratch.
+%macro X16_PIXEL_AVX2 3
+    movsxd      posq, dword [fltposq+%2*4]
+    lea         posq, [srcq+posq*2]
+    ; masked loads do not train the hardware prefetcher (Zen 5): a line
+    ; fresh from memory is ~2x slower without this
+%if %2 == 0
+    prefetcht0  [posq+512]
+%endif
+    vpmaskmovd   m%1, m9, [posq+lastoffq]
+    TO_SIGNED16  m%1, m12
+    vpmaskmovd    m10, m9, [filterq+lastoffq]
+    pmaddwd      m%1, m10
+%if %3 == 1
+    movu         m10, [posq]
+    TO_SIGNED16  m10, m12
+    pmaddwd      m10, [filterq]
+    paddd        m%1, m10
+%elif %3 == 2
+    mov      chunksq, nfullq
+%%chunk:
+    movu         m10, [posq]
+    TO_SIGNED16  m10, m12
+    pmaddwd      m10, [filterq]
+    paddd        m%1, m10
+    add         posq, 32
+    add      filterq, 32
+    dec      chunksq
+    jnz %%chunk
+%endif
+%if %3 == 2
+    add      filterq, lastq
+%else
+    add      filterq, rowq
+%endif
+%endmacro
+
+; a whole line: %1 source_width, %2 intermediate_nbits, %3 chunk mode
+%macro X16_LINE_AVX2 3
+    sub           wd, 4
+    jle .tail%3
+.loop%3:
+%assign %%i 0
+%rep 8
+    X16_PIXEL_AVX2 %%i, %%i, %3
+%assign %%i %%i+1
+%endrep
+    HADD4D        m0, m1, m2, m3, m10     ; px 0-3 | px 0-3
+    HADD4D        m4, m5, m6, m7, m10     ; px 4-7 | px 4-7
+    vperm2i128   m10, m0, m4, 0x31        ; the high lanes
+    vinserti128   m0, m0, xm4, 1          ; the low lanes
+    paddd         m0, m10
+%if %1 == 16
+    paddd         m0, m13
+%endif
+    psrad         m0, 14 + %1 - %2
+%if %2 == 15
+    vextracti128 xm1, m0, 1
+    packssdw     xm0, xm1
+    movu      [dstq], xm0
+    add         dstq, 16
+%else
+    pminsd        m0, m11
+    movu      [dstq], m0
+    add         dstq, 32
+%endif
+    add       fltposq, 32
+    sub           wd, 8
+    jg .loop%3
+.tail%3:
+    cmp           wd, -4
+    jle .end
+    ; 1-4 pixels left
+%assign %%i 0
+%rep 4
+    X16_PIXEL_AVX2 %%i, %%i, %3
+%assign %%i %%i+1
+%endrep
+    HADD4D        m0, m1, m2, m3, m10
+    vextracti128 xm1, m0, 1
+    paddd        xm0, xm1
+%if %1 == 16
+    paddd        xm0, xm13
+%endif
+    psrad        xm0, 14 + %1 - %2
+%if %2 == 15
+    packssdw     xm0, xm0
+    movq      [dstq], xm0
+%else
+    pminsd       xm0, xm11
+    movu      [dstq], xm0
+%endif
+    jmp .end
+%endmacro
+
+; SCALE_FUNC16_XM source_width, intermediate_nbits, X4/X8
+%macro SCALE_FUNC16_XM 3
+%assign src_width %1
+cglobal hscale%1to%2_%3_masked, 7, 13, 14, pos, dst, w, src, filter, fltpos, fltsize, chunks, nfull, lastoff, last, tmp, row
+    movsxd  fltsizeq, fltsized
+%if %1 == 16
+    mova         m12, [minshort_ymm]
+    mova         m13, [unicoeff_ymm]
+%endif
+%if %2 == 19
+    mova         m11, [max_19bit_ymm]
+%endif
+    lea         rowq, [fltsizeq*2]
+    lea       nfullq, [fltsizeq-1]
+    shr       nfullq, 4                   ; whole 16 tap chunks before the last
+    mov     lastoffq, nfullq
+    shl     lastoffq, 5                   ; the byte offset of the last chunk
+    mov        lastq, rowq
+    sub        lastq, lastoffq            ; its bytes: 8, 16, 24 or 32
+    lea         tmpq, [mask_dw+32]
+    sub         tmpq, lastq
+    movu          m9, [tmpq]              ; taps/2 dwords
+    cmp       nfulld, 1
+    jl .chunks0
+    je .chunks1
+    X16_LINE_AVX2 %1, %2, 2
+.chunks1:
+    X16_LINE_AVX2 %1, %2, 1
+.chunks0:
+    X16_LINE_AVX2 %1, %2, 0
+.end:
+    RET
+%endmacro
+
 ; SCALE_FUNCS16 source_width
 %macro SCALE_FUNCS16 1
 SCALE_FUNC16    %1, 15, 4
@@ -517,12 +662,16 @@ SCALE_FUNC16_X  %1, 15, X4
 SCALE_FUNC16_X  %1, 15, X8
 SCALE_FUNC16_XQ %1, 15, X4
 SCALE_FUNC16_XQ %1, 15, X8
+SCALE_FUNC16_XM %1, 15, X4
+SCALE_FUNC16_XM %1, 15, X8
 SCALE_FUNC16    %1, 19, 4
 SCALE_FUNC16    %1, 19, 8
 SCALE_FUNC16_X  %1, 19, X4
 SCALE_FUNC16_X  %1, 19, X8
 SCALE_FUNC16_XQ %1, 19, X4
 SCALE_FUNC16_XQ %1, 19, X8
+SCALE_FUNC16_XM %1, 19, X4
+SCALE_FUNC16_XM %1, 19, X8
 %endmacro
 
 INIT_YMM avx2

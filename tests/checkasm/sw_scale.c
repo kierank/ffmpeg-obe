@@ -312,6 +312,8 @@ DECL16(X4,     avx2)
 DECL16(X8,     avx2)
 DECL16(X4_2px, avx2)
 DECL16(X8_2px, avx2)
+DECL16(X4_masked, avx2)
+DECL16(X8_masked, avx2)
 DECL16(8,      avx512icl)
 DECL16(X4,     avx512icl)
 DECL16(X8,     avx512icl)
@@ -333,6 +335,8 @@ static const HscaleKernel hscale_kernels[] = {
     // the 2 pixel kernels were only ever dispatched for 16 taps and up
     K16(X4_2px, -16 - 4, avx2, AV_CPU_FLAG_AVX2),
     K16(X8_2px, -16 - 8, avx2, AV_CPU_FLAG_AVX2),
+    K16(X4_masked, -4, avx2, AV_CPU_FLAG_AVX2),
+    K16(X8_masked, -8, avx2, AV_CPU_FLAG_AVX2),
 #endif
 #if HAVE_AVX512ICL_EXTERNAL
     K1(8, 8,  8,  avx512icl, AV_CPU_FLAG_AVX512ICL),

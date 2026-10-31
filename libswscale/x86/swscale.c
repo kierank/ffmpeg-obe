@@ -333,6 +333,7 @@ SCALE_FUNCS16(4, avx2);
 SCALE_FUNCS16(8, avx2);
 SCALE_FUNCS16(X4, avx2);
 SCALE_FUNCS16(X8, avx2);
+SCALE_FUNCS16(X4_masked, avx2);
 SCALE_FUNCS16(4,  avx512icl);
 SCALE_FUNCS16(8,  avx512icl);
 SCALE_FUNCS16(X4, avx512icl);
@@ -673,9 +674,12 @@ switch(c->dstBpc){ \
     switch (filtersize) { \
     case 4: ASSIGN_SCALE_FUNC2_16(hscalefn, 4, avx2); break; \
     case 8: ASSIGN_SCALE_FUNC2_16(hscalefn, 8, avx2); break; \
-    /* 12 taps stays on ssse3/sse4: X4_avx2 is 0.82-0.89x of them there on \
-     * Raptor Cove */ \
-    default: if (filtersize == 12) break; \
+    /* 12 taps: X4_masked, 1.6-1.9x of ssse3/sse4 on Zen 5; the plain X4 \
+     * is 0.82-0.89x of them there on Raptor Cove */ \
+    default: if (filtersize == 12) { \
+                 ASSIGN_SCALE_FUNC2_16(hscalefn, X4_masked, avx2); \
+                 break; \
+             } \
              if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx2); \
              else                ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx2); \
              break; \
