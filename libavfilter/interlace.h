@@ -55,6 +55,9 @@ typedef struct InterlaceContext {
     enum ScanMode scan;    // top or bottom field first scanning
     int lowpass;           // enable or disable low pass filtering
     AVFrame *cur, *next;   // the two frames from which the new one is obtained
+    int nb_planes;
+    int linesize[4];       // bytes per line of each plane
+    int planeheight[4];
     void (*lowpass_line)(uint8_t *dstp, ptrdiff_t linesize, const uint8_t *srcp,
                          ptrdiff_t mref, ptrdiff_t pref);
 } InterlaceContext;
