@@ -721,12 +721,15 @@ switch(c->dstBpc){ \
     }
     /* 8 bit input, the sizes where the masked kernels beat the plain ones
      * consistently on Raptor Cove (plain/masked over 5 runs): 12 1.57-1.73x,
-     * 16 1.06x, 28 1.38-1.39x, 32 1.05-1.06x.  20 and 24 are borderline and
-     * 40 is level, so those keep the plain ones for now. */
+     * 16 1.06x, 28 1.38-1.39x, 32 1.05-1.06x; over 20 runs, 20 1.07-1.08x and
+     * 24 1.07-1.08x (both about half that at 1280/1920 wide).  40 is
+     * 0.97-0.99x, slower at width, so it keeps the plain X8. */
 #define ASSIGN_8BIT_MASKED_SCALE_FUNC(hscalefn, filtersize) \
     switch (filtersize) { \
     case 12: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
     case 16: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
+    case 20: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
+    case 24: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
     case 28: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
     case 32: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
     default: break; \
