@@ -227,10 +227,103 @@ static void check_yuv2yuvX(int accurate, int bpc, enum AVPixelFormat dstFormat)
 #undef LARGEST_FILTER
 }
 
-#define SRC_PIXELS 512
+#define MAX_DST_W 1920
 #define MAX_FILTER_WIDTH 40
 // rounded up: randomize_buffers() writes in units of four bytes
-#define SRC_SAMPLES (SRC_PIXELS + 4 + MAX_FILTER_WIDTH)
+#define SRC_SAMPLES 4096
+
+typedef void (*hscale_fn)(struct SwsContext *c, int16_t *dst, int dstW,
+                          const uint8_t *src, const int16_t *filter,
+                          const int32_t *filterPos, int filterSize);
+
+#define HSCALE_PROTO(name) \
+    void name(struct SwsContext *c, int16_t *dst, int dstW, const uint8_t *src, \
+              const int16_t *filter, const int32_t *filterPos, int filterSize)
+
+// Kernels tested by name as well as through the dispatch, so that the ones
+// written but not dispatched (and the ones a faster version shadows on this
+// cpu) are covered too.  fs is the filter size, or -4/-8 for X4/X8.
+typedef struct HscaleKernel {
+    const char *name;
+    hscale_fn fn;
+    int cpu_flag;
+    int depth;      // the source depth the function is for
+    int to19;
+    int fs;
+} HscaleKernel;
+
+#if ARCH_X86_64 && HAVE_X86ASM
+#define DECL1(d, fs, opt) \
+    HSCALE_PROTO(ff_hscale ## d ## to15_ ## fs ## _ ## opt); \
+    HSCALE_PROTO(ff_hscale ## d ## to19_ ## fs ## _ ## opt);
+#define DECL16(fs, opt) \
+    DECL1(9, fs, opt) DECL1(10, fs, opt) DECL1(12, fs, opt) \
+    DECL1(14, fs, opt) DECL1(16, fs, opt)
+DECL1(8, 8,  avx2)
+DECL1(8, X4, avx2)
+DECL1(8, X8, avx2)
+DECL1(8, X4_masked, avx2)
+DECL1(8, X8_masked, avx2)
+DECL1(8, 8,  avx512icl)
+DECL1(8, X4, avx512icl)
+DECL1(8, X8, avx512icl)
+DECL16(X4,     avx2)
+DECL16(X8,     avx2)
+DECL16(X4_2px, avx2)
+DECL16(X8_2px, avx2)
+DECL16(8,      avx512icl)
+DECL16(X4,     avx512icl)
+DECL16(X8,     avx512icl)
+#define K1(d, fs, fsn, opt, flag) \
+    { #d "to15_" #fs "_" #opt, ff_hscale ## d ## to15_ ## fs ## _ ## opt, flag, d, 0, fsn }, \
+    { #d "to19_" #fs "_" #opt, ff_hscale ## d ## to19_ ## fs ## _ ## opt, flag, d, 1, fsn }
+#define K16(fs, fsn, opt, flag) \
+    K1(9, fs, fsn, opt, flag), K1(10, fs, fsn, opt, flag), K1(12, fs, fsn, opt, flag), \
+    K1(14, fs, fsn, opt, flag), K1(16, fs, fsn, opt, flag)
+static const HscaleKernel hscale_kernels[] = {
+#if HAVE_AVX2_EXTERNAL
+    K1(8, 8,  8,  avx2, AV_CPU_FLAG_AVX2),
+    K1(8, X4, -4, avx2, AV_CPU_FLAG_AVX2),
+    K1(8, X8, -8, avx2, AV_CPU_FLAG_AVX2),
+    K1(8, X4_masked, -4, avx2, AV_CPU_FLAG_AVX2),
+    K1(8, X8_masked, -8, avx2, AV_CPU_FLAG_AVX2),
+    K16(X4,     -4, avx2, AV_CPU_FLAG_AVX2),
+    K16(X8,     -8, avx2, AV_CPU_FLAG_AVX2),
+    // the 2 pixel kernels were only ever dispatched for 16 taps and up
+    K16(X4_2px, -16 - 4, avx2, AV_CPU_FLAG_AVX2),
+    K16(X8_2px, -16 - 8, avx2, AV_CPU_FLAG_AVX2),
+#endif
+#if HAVE_AVX512ICL_EXTERNAL
+    K1(8, 8,  8,  avx512icl, AV_CPU_FLAG_AVX512ICL),
+    K1(8, X4, -4, avx512icl, AV_CPU_FLAG_AVX512ICL),
+    K1(8, X8, -8, avx512icl, AV_CPU_FLAG_AVX512ICL),
+    K16(8,  8,  avx512icl, AV_CPU_FLAG_AVX512ICL),
+    K16(X4, -4, avx512icl, AV_CPU_FLAG_AVX512ICL),
+    K16(X8, -8, avx512icl, AV_CPU_FLAG_AVX512ICL),
+#endif
+    { NULL },
+};
+#else
+static const HscaleKernel hscale_kernels[] = { { NULL } };
+#endif
+
+// fs -4/-8: X4/X8, for filters over 8 taps; -20/-24: the same from 16 taps up
+static int kernel_fits(const HscaleKernel *k, int depth, int to19, int fs)
+{
+    int min = 9;
+    int x   = -k->fs;
+    if (!k->fn || k->depth != depth || k->to19 != to19)
+        return 0;
+    if (k->fs > 0)
+        return k->fs == fs;
+    if (x > 16) {
+        min = 16;
+        x  -= 16;
+    }
+    if (fs < min)
+        return 0;
+    return x == 4 ? (fs & 4) != 0 : !(fs & 4);
+}
 
 static void randomize_src(uint16_t *src, int n, int bpc, int bits)
 {
@@ -249,14 +342,16 @@ static void randomize_src(uint16_t *src, int n, int bpc, int bits)
 static void check_hscale(void)
 {
     // 16 and 32 are whole 16 tap chunks, 24 and 40 leave an odd 8 tap one, and
-    // 20 and 28 are the same two cases with the X4 split tail on the end
+    // 20 and 28 are the same two cases with the X4 split tail on the end; 12
+    // is a lone 8 + 4
     static const int filter_sizes[] = { 4, 8, 12, 16, 20, 24, 28, 32, 40 };
-    // 13 and 33 leave a pixel over for the tail of the wider scalers, 12 a
-    // whole unit of 4, the rest nothing at all
-    static const int dst_widths[] = { 8, 12, 13, 16, 33, 128, 144, 256, 512 };
+    // the obed scales (1920, 1280, 960, 720 and the 240/256 thumbnails), the
+    // units of 4/8/16 the kernels work in, one over, and the odd and tiny
+    static const int dst_widths[] = { 1, 3, 8, 12, 13, 16, 17, 33, 128, 144, 240,
+                                      256, 512, 720, 960, 1280, 1919, 1920 };
     static const struct {
         int bpc;
-        int bits;
+        int bits;   // also the depth of the function swscale picks
         enum AVPixelFormat fmt;
     } src_types[] = {
         {  8,  8, AV_PIX_FMT_GRAY8       },
@@ -269,27 +364,48 @@ static void check_hscale(void)
         { 16, 14, AV_PIX_FMT_RGB24       },
     };
     static const int dst_bpcs[] = { 14, 16 };
-    // the step between the filter positions of neighbouring output pixels: 1 is
-    // a mild scale, which is what the widest kernels are written for, and 5
-    // spreads the taps of one iteration of the avx512 kernels over more than
-    // the source window they load, so their fallback is covered as well
-    static const int pos_steps[] = { 1, 5 };
+    // the step between the filter positions of neighbouring output pixels, as
+    // the scale ratio srcW/dstW: 1 is a mild scale, 5 spreads the taps of one
+    // iteration of the avx512 window kernels over more than the window, so
+    // that their fallback is covered, and the rest are the obed scales
+    static const struct {
+        int num, den;
+        const char *name;
+        int bench_w;    // the dstW obed uses at this ratio, or 0
+    } pos_steps[] = {
+        {  1, 1, "1",    512 },
+        {  5, 1, "5",    256 },     // 1280x720 thumbnail
+        {  3, 8, "3o8", 1920 },     // 720 -> 1920
+        {  2, 3, "2o3", 1920 },     // 1280 -> 1920
+        {  3, 2, "3o2", 1280 },     // 1920 -> 1280
+        { 16, 9, "16o9", 720 },     // 1280 -> 720
+        {  8, 3, "8o3",  720 },     // 1920 -> 720
+        {  3, 1, "3",    240 },     // 720x576 thumbnail
+        {  8, 1, "8",    240 },     // 1920x1080 thumbnail
+    };
+    // the C function per source type and output width, for the kernels
+    // tested by name; the C pass of checkasm always runs first
+    static hscale_fn c_fn[FF_ARRAY_ELEMS(src_types)][2];
 
     struct SwsContext *c;
-    int sti, fsi, dwi, bi, psi, i, j;
+    int sti, fsi, dwi, bi, psi, i, j, ki;
 
-    // filter and filterPos carry the three entries of padding initFilter()
-    // leaves for the scalers that read past dstW
     LOCAL_ALIGNED_32(uint16_t, src, [SRC_SAMPLES]);
-    LOCAL_ALIGNED_32(int16_t, filter, [(SRC_PIXELS + 3) * MAX_FILTER_WIDTH]);
-    LOCAL_ALIGNED_32(int32_t, filterPos, [SRC_PIXELS + 3]);
-    LOCAL_ALIGNED_32(uint32_t, dst0, [SRC_PIXELS + 8]);
-    LOCAL_ALIGNED_32(uint32_t, dst1, [SRC_PIXELS + 8]);
+    int16_t *filter  = av_malloc((MAX_DST_W + 3) * MAX_FILTER_WIDTH * sizeof(*filter));
+    int16_t *tfilter = av_malloc((MAX_DST_W + 3) * MAX_FILTER_WIDTH * sizeof(*filter));
+    int32_t *filterPos = av_malloc((MAX_DST_W + 3) * sizeof(*filterPos));
+    uint32_t *dst0 = av_malloc((MAX_DST_W + 8) * sizeof(*dst0));
+    uint32_t *dst1 = av_malloc((MAX_DST_W + 8) * sizeof(*dst1));
 
     // dst is int16_t or int32_t depending on dstBpc
     declare_func_emms(AV_CPU_FLAG_MMX, void, struct SwsContext *c, int16_t *dst,
                       int dstW, const uint8_t *src, const int16_t *filter,
                       const int32_t *filterPos, int filterSize);
+
+    if (!filter || !tfilter || !filterPos || !dst0 || !dst1) {
+        fail();
+        goto end;
+    }
 
     c = sws_alloc_context();
     if (sws_init_context(c, NULL, NULL) < 0)
@@ -307,7 +423,7 @@ static void check_hscale(void)
             // positive clip at (1 << 15) - 1 are reached.  The row has to sum
             // to exactly 1 << 14, since the 16 bit input functions fold
             // 0x8000 * sum(coeffs) back in as a constant.
-            for (i = 0; i < SRC_PIXELS + 3; i++) {
+            for (i = 0; i < MAX_DST_W; i++) {
                 int k = rnd() % width;
                 int sum = 0;
                 for (j = 0; j < width; j++)
@@ -320,70 +436,110 @@ static void check_hscale(void)
 
             for (bi = 0; bi < FF_ARRAY_ELEMS(dst_bpcs); bi++) {
                 int dst_bpc  = dst_bpcs[bi];
-                int dst_size = dst_bpc <= 14 ? sizeof(int16_t) : sizeof(int32_t);
+                int to19     = dst_bpc > 14;
+                int dst_size = to19 ? sizeof(int32_t) : sizeof(int16_t);
 
                 c->srcFormat        = src_types[sti].fmt;
                 c->srcBpc           = src_types[sti].bpc;
                 c->dstBpc           = dst_bpc;
                 c->hLumFilterSize   = c->hChrFilterSize = width;
                 ff_getSwsFunc(c);
+                if (!av_get_cpu_flags())
+                    c_fn[sti][to19] = c->hcScale;
 
                 for (dwi = 0; dwi < FF_ARRAY_ELEMS(dst_widths); dwi++) {
                 for (psi = 0; psi < FF_ARRAY_ELEMS(pos_steps); psi++) {
                     int dstW = dst_widths[dwi];
-                    int step = pos_steps[psi];
+                    int num  = pos_steps[psi].num, den = pos_steps[psi].den;
+                    // as initFilter(): centred taps, clamped to the line
+                    int srcW = FFMAX((dstW * num + den - 1) / den, width);
                     // the scalers work in units of 4 pixels and may run into
                     // the last one, but no further
                     int written = FFALIGN(dstW, 4);
+                    int do_bench = dstW == pos_steps[psi].bench_w;
 
-                    // the taps of the last pixel, and what the widest kernels
-                    // read past them, have to stay inside src
-                    if (step * (dstW - 1) + MAX_FILTER_WIDTH + 4 > SRC_SAMPLES)
+                    if (srcW > SRC_SAMPLES)
                         continue;
-                    for (i = 0; i < SRC_PIXELS + 3; i++)
-                        filterPos[i] = i * step;
-
-                    if (!check_func(c->hcScale, "hscale_%d_to_%d__fs_%d_dstW_%d_step_%d__%s",
-                                    src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
-                                    width, dstW, step,
-                                    av_get_pix_fmt_name(src_types[sti].fmt)))
-                        continue;
-
-                    memset(dst0, 0, (SRC_PIXELS + 8) * sizeof(dst0[0]));
-                    memset(dst1, 0, (SRC_PIXELS + 8) * sizeof(dst1[0]));
-
-                    call_ref(c, (int16_t*)dst0, dstW, (const uint8_t*)src,
-                             filter, filterPos, width);
-                    call_new(c, (int16_t*)dst1, dstW, (const uint8_t*)src,
-                             filter, filterPos, width);
-
-                    if (memcmp(dst0, dst1, dstW * dst_size)) {
-                        fail();
-                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%d__%s\n",
-                               src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
-                               width, dstW, step,
-                               av_get_pix_fmt_name(src_types[sti].fmt));
+                    for (i = 0; i < dstW; i++) {
+                        int pos = (int)(((2LL * i + 1) * num) / (2 * den)) - width / 2;
+                        filterPos[i] = av_clip(pos, 0, srcW - width);
                     }
-                    if (memcmp((uint8_t*)dst0 + written * dst_size,
-                               (uint8_t*)dst1 + written * dst_size,
-                               (SRC_PIXELS + 8) * sizeof(dst0[0]) - written * dst_size)) {
-                        fail();
-                        printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%d__%s wrote past dstW\n",
-                               src_types[sti].bpc, dst_bpc <= 14 ? 15 : 19,
-                               width, dstW, step,
-                               av_get_pix_fmt_name(src_types[sti].fmt));
+                    // the padding initFilter() leaves for the scalers that
+                    // read past dstW
+                    memcpy(tfilter, filter, dstW * width * sizeof(*filter));
+                    for (i = dstW; i < dstW + 3; i++) {
+                        filterPos[i] = filterPos[dstW - 1];
+                        memcpy(tfilter + i * width, filter + (dstW - 1) * width,
+                               width * sizeof(*filter));
                     }
 
-                    if (dstW == SRC_PIXELS)
-                        bench_new(c, (int16_t*)dst1, dstW, (const uint8_t*)src,
-                                  filter, filterPos, width);
+                    for (ki = -1; ki < 0 || hscale_kernels[ki].name; ki++) {
+                        const HscaleKernel *k = ki < 0 ? NULL : &hscale_kernels[ki];
+                        char kname[32];
+                        if (k) {
+                            if (!kernel_fits(k, src_types[sti].bits, to19, width) ||
+                                !(av_get_cpu_flags() & k->cpu_flag) ||
+                                !c_fn[sti][to19])
+                                continue;
+                            snprintf(kname, sizeof(kname), "%s", k->name);
+                            if (!check_func(k->fn, "hscale_%d_to_%d__fs_%d_dstW_%d_step_%s__%s__%s",
+                                            src_types[sti].bpc, to19 ? 19 : 15, width, dstW,
+                                            pos_steps[psi].name,
+                                            av_get_pix_fmt_name(src_types[sti].fmt), kname))
+                                continue;
+                            // the kernel registers itself first, so the C one is the reference
+                            func_ref = c_fn[sti][to19];
+                        } else {
+                            snprintf(kname, sizeof(kname), "dispatch");
+                            if (!check_func(c->hcScale, "hscale_%d_to_%d__fs_%d_dstW_%d_step_%s__%s",
+                                            src_types[sti].bpc, to19 ? 19 : 15, width, dstW,
+                                            pos_steps[psi].name,
+                                            av_get_pix_fmt_name(src_types[sti].fmt)))
+                                continue;
+                        }
+
+                        memset(dst0, 0, (MAX_DST_W + 8) * sizeof(dst0[0]));
+                        memset(dst1, 0, (MAX_DST_W + 8) * sizeof(dst1[0]));
+
+                        call_ref(c, (int16_t*)dst0, dstW, (const uint8_t*)src,
+                                 tfilter, filterPos, width);
+                        call_new(c, (int16_t*)dst1, dstW, (const uint8_t*)src,
+                                 tfilter, filterPos, width);
+
+                        if (memcmp(dst0, dst1, dstW * dst_size)) {
+                            fail();
+                            printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%s__%s %s\n",
+                                   src_types[sti].bpc, to19 ? 19 : 15,
+                                   width, dstW, pos_steps[psi].name,
+                                   av_get_pix_fmt_name(src_types[sti].fmt), kname);
+                        }
+                        if (memcmp((uint8_t*)dst0 + written * dst_size,
+                                   (uint8_t*)dst1 + written * dst_size,
+                                   (MAX_DST_W + 8) * sizeof(dst0[0]) - written * dst_size)) {
+                            fail();
+                            printf("failed: hscale_%d_to_%d__fs_%d_dstW_%d_step_%s__%s %s wrote past dstW\n",
+                                   src_types[sti].bpc, to19 ? 19 : 15,
+                                   width, dstW, pos_steps[psi].name,
+                                   av_get_pix_fmt_name(src_types[sti].fmt), kname);
+                        }
+
+                        if (do_bench)
+                            bench_new(c, (int16_t*)dst1, dstW, (const uint8_t*)src,
+                                      tfilter, filterPos, width);
+                    }
                 }
                 }
             }
         }
     }
     sws_freeContext(c);
-#undef SRC_PIXELS
+end:
+    av_free(filter);
+    av_free(tfilter);
+    av_free(filterPos);
+    av_free(dst0);
+    av_free(dst1);
+#undef MAX_DST_W
 #undef SRC_SAMPLES
 #undef MAX_FILTER_WIDTH
 }

@@ -30,6 +30,8 @@ unicoeff_ymm:  times  8 dd 0x20000000
 max_19bit_ymm: times  8 dd 0x7ffff
 ; the 8 tap tree ends with one pixel per lane half: 0 2 4 6 | 1 3 5 7
 swizzle_8tap:  dd 0, 4, 1, 5, 2, 6, 3, 7
+; the last four of eight words, for the 4 tap remainder of the X4 kernels
+hi4_words:     dw 0, 0, 0, 0, -1, -1, -1, -1
 
 SECTION .text
 
@@ -246,7 +248,7 @@ cglobal hscale%1to%2_%3, 6, 8, 10, pos0, dst, w, src, filter, fltpos, pos1, cnt
 %else ; X8
 %define dlt 0
 %endif
-cglobal hscale%1to%2_%3, 7, 10, 9, pos0, dst, w, srcmem, filter, fltpos, fltsize
+cglobal hscale%1to%2_%3_2px, 7, 10, 9, pos0, dst, w, srcmem, filter, fltpos, fltsize
 %define srcq      r7
 %define pos1q     r8
 %define srcend16q r9
@@ -344,16 +346,183 @@ cglobal hscale%1to%2_%3, 7, 10, 9, pos0, dst, w, srcmem, filter, fltpos, fltsize
     RET
 %endmacro
 
+;-----------------------------------------------------------------------------
+; An arbitrary filterSize again, four output pixels in flight.  The kernel
+; above (kept as _2px) folds its two accumulators after every pair of pixels,
+; and that fold, not the multiplies, is what bounds it: with a 16 tap filter it
+; is no faster than ssse3.  Four accumulators fold in one HADD4D tree, half the
+; shuffles a pixel, and the four source rows and filter rows are walked by one
+; shared offset, since a tap is two bytes of either.
+;
+; After the whole 16 tap chunks, an 8 tap one (filterSize & 8) and, for X4, a
+; 4 tap one.  The 4 tap one loads the eight words that end at the last tap and
+; masks off the four already done, so neither the source nor the filter row
+; is read past its end.  This also covers filterSize 12, which the _2px kernel
+; leaves to ssse3.  Pixels are done in fours up to FFALIGN(dstW, 4), as the
+; ssse3 kernels do.
+;-----------------------------------------------------------------------------
+
+; Per 128 bit lane, the sums of the four dwords of each of %1-%4, in that
+; order, to %1.  %5 is scratch.
+%macro HADD4D 5
+    punpckldq       %5, %1, %2
+    punpckhdq       %1, %2
+    paddd           %1, %5              ; a02 b02 a13 b13
+    punpckldq       %5, %3, %4
+    punpckhdq       %3, %4
+    paddd           %3, %5              ; c02 d02 c13 d13
+    punpcklqdq      %5, %1, %3
+    punpckhqdq      %1, %3
+    paddd           %1, %5              ; a b c d
+%endmacro
+
+; 16 bit input is moved to signed for pmaddwd, as above; %1 = register, %2 = minshort
+%macro TO_SIGNED16 2
+%if src_width == 16
+    psubw           %1, %2
+%endif
+%endmacro
+
+; SCALE_FUNC16_XQ source_width, intermediate_nbits, X4/X8
+%macro SCALE_FUNC16_XQ 3
+%assign src_width %1
+cglobal hscale%1to%2_%3, 7, 15, 12, f1, dst, w, src, filter, fltpos, fltsize, s0, s1, s2, s3, f2, f3, tap, lim
+    movsxd  fltsizeq, fltsized
+    lea         limq, [fltsizeq*2-32]     ; the last byte a 16 tap chunk may start at
+%if %1 == 16
+    mova         m10, [minshort_ymm]
+    mova         m11, [unicoeff_ymm]
+%endif
+%if %2 == 19
+    mova          m9, [max_19bit_ymm]
+%endif
+%ifidn %3, X4
+    mova         xm8, [hi4_words]
+%endif
+
+.loop:
+    movsxd       s0q, dword [fltposq+ 0]
+    movsxd       s1q, dword [fltposq+ 4]
+    movsxd       s2q, dword [fltposq+ 8]
+    movsxd       s3q, dword [fltposq+12]
+    lea          s0q, [srcq+s0q*2]
+    lea          s1q, [srcq+s1q*2]
+    lea          s2q, [srcq+s2q*2]
+    lea          s3q, [srcq+s3q*2]
+    lea          f1q, [filterq+fltsizeq*2]
+    lea          f2q, [filterq+fltsizeq*4]
+    lea          f3q, [f1q+fltsizeq*4]
+    pxor          m0, m0
+    pxor          m1, m1
+    pxor          m2, m2
+    pxor          m3, m3
+    xor         tapd, tapd
+    test        limq, limq
+    js .rem8
+
+.inner:
+    movu          m4, [s0q+tapq]
+    movu          m5, [s1q+tapq]
+    movu          m6, [s2q+tapq]
+    movu          m7, [s3q+tapq]
+    TO_SIGNED16   m4, m10
+    TO_SIGNED16   m5, m10
+    TO_SIGNED16   m6, m10
+    TO_SIGNED16   m7, m10
+    pmaddwd       m4, [filterq+tapq]
+    pmaddwd       m5, [f1q+tapq]
+    pmaddwd       m6, [f2q+tapq]
+    pmaddwd       m7, [f3q+tapq]
+    paddd         m0, m4
+    paddd         m1, m5
+    paddd         m2, m6
+    paddd         m3, m7
+    add         tapq, 32
+    cmp         tapq, limq
+    jle .inner
+
+.rem8:
+    test    fltsized, 8
+    jz .rem4
+    ; the xmm results leave the upper lane zeroed
+    movu         xm4, [s0q+tapq]
+    movu         xm5, [s1q+tapq]
+    movu         xm6, [s2q+tapq]
+    movu         xm7, [s3q+tapq]
+    TO_SIGNED16  xm4, xm10
+    TO_SIGNED16  xm5, xm10
+    TO_SIGNED16  xm6, xm10
+    TO_SIGNED16  xm7, xm10
+    pmaddwd      xm4, [filterq+tapq]
+    pmaddwd      xm5, [f1q+tapq]
+    pmaddwd      xm6, [f2q+tapq]
+    pmaddwd      xm7, [f3q+tapq]
+    paddd         m0, m4
+    paddd         m1, m5
+    paddd         m2, m6
+    paddd         m3, m7
+    add         tapq, 16
+.rem4:
+%ifidn %3, X4
+    movu         xm4, [s0q+tapq-8]
+    movu         xm5, [s1q+tapq-8]
+    movu         xm6, [s2q+tapq-8]
+    movu         xm7, [s3q+tapq-8]
+    TO_SIGNED16  xm4, xm10
+    TO_SIGNED16  xm5, xm10
+    TO_SIGNED16  xm6, xm10
+    TO_SIGNED16  xm7, xm10
+    pand         xm4, xm8
+    pand         xm5, xm8
+    pand         xm6, xm8
+    pand         xm7, xm8
+    pmaddwd      xm4, [filterq+tapq-8]
+    pmaddwd      xm5, [f1q+tapq-8]
+    pmaddwd      xm6, [f2q+tapq-8]
+    pmaddwd      xm7, [f3q+tapq-8]
+    paddd         m0, m4
+    paddd         m1, m5
+    paddd         m2, m6
+    paddd         m3, m7
+%endif
+
+    HADD4D        m0, m1, m2, m3, m4      ; px0-3 | px0-3
+    vextracti128 xm1, m0, 1
+    paddd        xm0, xm1
+%if %1 == 16
+    paddd        xm0, xm11
+%endif
+    psrad        xm0, 14 + %1 - %2
+%if %2 == 15
+    packssdw     xm0, xm0
+    movq      [dstq], xm0
+    add         dstq, 8
+%else ; %2 == 19
+    pminsd       xm0, xm9
+    movu      [dstq], xm0
+    add         dstq, 16
+%endif ; %2 == 15/19
+    lea      filterq, [f3q+fltsizeq*2]
+    add       fltposq, 16
+    sub           wd, 4
+    jg .loop
+    RET
+%endmacro
+
 ; SCALE_FUNCS16 source_width
 %macro SCALE_FUNCS16 1
-SCALE_FUNC16   %1, 15, 4
-SCALE_FUNC16   %1, 15, 8
-SCALE_FUNC16_X %1, 15, X4
-SCALE_FUNC16_X %1, 15, X8
-SCALE_FUNC16   %1, 19, 4
-SCALE_FUNC16   %1, 19, 8
-SCALE_FUNC16_X %1, 19, X4
-SCALE_FUNC16_X %1, 19, X8
+SCALE_FUNC16    %1, 15, 4
+SCALE_FUNC16    %1, 15, 8
+SCALE_FUNC16_X  %1, 15, X4
+SCALE_FUNC16_X  %1, 15, X8
+SCALE_FUNC16_XQ %1, 15, X4
+SCALE_FUNC16_XQ %1, 15, X8
+SCALE_FUNC16    %1, 19, 4
+SCALE_FUNC16    %1, 19, 8
+SCALE_FUNC16_X  %1, 19, X4
+SCALE_FUNC16_X  %1, 19, X8
+SCALE_FUNC16_XQ %1, 19, X4
+SCALE_FUNC16_XQ %1, 19, X8
 %endmacro
 
 INIT_YMM avx2
