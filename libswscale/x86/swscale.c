@@ -348,6 +348,7 @@ SCALE_FUNCS8(8,  avx2);
 SCALE_FUNCS8(X4, avx2);
 SCALE_FUNCS8(X8, avx2);
 SCALE_FUNCS8(X4_masked, avx2);
+SCALE_FUNCS8(X8_masked, avx2);
 SCALE_FUNCS8(4,  avx512icl);
 SCALE_FUNCS8(8,  avx512icl);
 SCALE_FUNCS8(X4, avx512icl);
@@ -718,6 +719,18 @@ switch(c->dstBpc){ \
              else                ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8, opt); \
              break; \
     }
+    /* 8 bit input, the sizes where the masked kernels beat the plain ones
+     * consistently on Raptor Cove (plain/masked over 5 runs): 12 1.57-1.73x,
+     * 16 1.06x, 28 1.38-1.39x, 32 1.05-1.06x.  20 and 24 are borderline and
+     * 40 is level, so those keep the plain ones for now. */
+#define ASSIGN_8BIT_MASKED_SCALE_FUNC(hscalefn, filtersize) \
+    switch (filtersize) { \
+    case 12: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
+    case 16: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
+    case 28: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
+    case 32: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
+    default: break; \
+    }
     if (EXTERNAL_AVX2_FAST(cpu_flags)) {
         ASSIGN_VSCALEX_FUNC(c->yuv2planeX, avx2, , 1);
         if (c->use_mmx_vfilter && !(c->flags & SWS_ACCURATE_RND))
@@ -728,11 +741,8 @@ switch(c->dstBpc){ \
         } else {
             ASSIGN_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize, avx2);
             ASSIGN_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize, avx2);
-            /* 12 taps: the masked kernel, which does them in one step */
-            if (c->hLumFilterSize == 12)
-                ASSIGN_8BIT_SCALE_FUNC2(c->hyScale, X4_masked, avx2);
-            if (c->hChrFilterSize == 12)
-                ASSIGN_8BIT_SCALE_FUNC2(c->hcScale, X4_masked, avx2);
+            ASSIGN_8BIT_MASKED_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
+            ASSIGN_8BIT_MASKED_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
         }
 
         switch (c->srcFormat) {
