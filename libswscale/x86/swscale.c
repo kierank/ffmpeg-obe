@@ -438,6 +438,8 @@ INPUT_UV_FUNC(nv20LE, avx2);
 INPUT_UV_FUNC(nv20BE, avx2);
 INPUT_Y_FUNC(bswap16, avx2);
 INPUT_UV_FUNC(nv20LE, avx512);
+INPUT_UV_FUNC(nv12, avx512icl);
+INPUT_UV_FUNC(nv21, avx512icl);
 INPUT_UV_FUNC(nv20BE, avx512);
 INPUT_Y_FUNC(bswap16, avx512);
 #endif
@@ -758,6 +760,17 @@ switch(c->dstBpc){ \
         }
     }
     if (EXTERNAL_AVX512ICL(cpu_flags)) {
+        switch (c->srcFormat) {
+        case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_NV16:
+            c->chrToYV12 = ff_nv12ToUV_avx512icl;
+            break;
+        case AV_PIX_FMT_NV21:
+            c->chrToYV12 = ff_nv21ToUV_avx512icl;
+            break;
+        default:
+            break;
+        }
         switch (c->dstBpc) {
         case 10: if (!isBE(c->dstFormat)) c->yuv2planeX = ff_yuv2planeX_10_avx512icl; break;
         case 9:  if (!isBE(c->dstFormat)) c->yuv2planeX = ff_yuv2planeX_9_avx512icl;  break;

@@ -102,6 +102,19 @@ shuf_bswap16:    db 1, 0, 3, 2,  5,  4,  7,  6, 9, 8, 11, 10, 13, 12, 15, 14
 ; vpermt2q indices picking the U (even) and V (odd) qwords of two vectors
 qidx_even:       db 0, 2, 4, 6, 8, 10, 12, 14
 qidx_odd:        db 1, 3, 5, 7, 9, 11, 13, 15
+; vpermt2b indices picking the even (U) and odd (V) bytes of two vectors
+bidx_even:
+%assign i 0
+%rep 64
+    db 2*i
+%assign i i+1
+%endrep
+bidx_odd:
+%assign i 0
+%rep 64
+    db 2*i+1
+%assign i i+1
+%endrep
 
 SECTION .text
 
@@ -929,5 +942,76 @@ INIT_ZMM avx512
 NV20_TO_UV_AVX512 LE
 NV20_TO_UV_AVX512 BE
 BSWAP16_TO_Y_AVX512
+%endif
+
+; NV12/NV21/NV16 chroma with avx512icl: 64 pixels an iteration, the 128
+; bytes of UV split by two vpermt2b, one for the even and one for the odd
+; bytes, where the avx2 version masks, shifts, packs and fixes the lane order
+; of each half.  The last 1-63 pixels are masked loads and stores, so nothing
+; past w is read or written.
+; %1 = nv12 or nv21
+%macro NVXX_TO_UV_AVX512 1
+cglobal %1ToUV, 6, 8, 5, dstU, dstV, tmp1, src, tmp2, w, n, m
+    movsxd         wq, wd
+    add         dstUq, wq
+    add         dstVq, wq
+    lea          srcq, [srcq+wq*2]
+    neg            wq
+    movu           m3, [bidx_even]
+    movu           m4, [bidx_odd]
+    add            wq, 64
+    jg .tail
+.loop:
+    movu           m0, [srcq+wq*2-128]    ; (byte) { U0, V0, ..., U31, V31 }
+    movu           m1, [srcq+wq*2-64]     ; (byte) { U32, V32, ..., U63, V63 }
+    mova           m2, m0
+    vpermt2b       m0, m3, m1             ; U0-63
+    vpermt2b       m2, m4, m1             ; V0-63
+%ifidn %1, nv12
+    movu  [dstUq+wq-64], m0
+    movu  [dstVq+wq-64], m2
+%else ; nv21
+    movu  [dstVq+wq-64], m0
+    movu  [dstUq+wq-64], m2
+%endif
+    add            wq, 64
+    jle .loop
+.tail:
+    sub            wq, 64                 ; -(pixels left)
+    jz .end
+    mov            nq, wq
+    neg            nq
+    mov         tmp1q, -1
+    bzhi        tmp2q, tmp1q, nq
+    kmovq          k3, tmp2q              ; n bytes of U and of V
+    lea            mq, [nq*2]
+    bzhi        tmp2q, tmp1q, mq          ; all ones from 64 up
+    kmovq          k1, tmp2q              ; the first 64 of the 2n bytes of source
+    sub            mq, 64
+    bzhi        tmp2q, tmp1q, mq
+    xor            nd, nd
+    test           mq, mq
+    cmovle      tmp2q, nq
+    kmovq          k2, tmp2q              ; the rest
+    vmovdqu8       m0{k1}{z}, [srcq+wq*2]
+    vmovdqu8       m1{k2}{z}, [srcq+wq*2+64]
+    mova           m2, m0
+    vpermt2b       m0, m3, m1
+    vpermt2b       m2, m4, m1
+%ifidn %1, nv12
+    vmovdqu8       [dstUq+wq]{k3}, m0
+    vmovdqu8       [dstVq+wq]{k3}, m2
+%else ; nv21
+    vmovdqu8       [dstVq+wq]{k3}, m0
+    vmovdqu8       [dstUq+wq]{k3}, m2
+%endif
+.end:
+    RET
+%endmacro
+
+%if HAVE_AVX512ICL_EXTERNAL
+INIT_ZMM avx512icl
+NVXX_TO_UV_AVX512 nv12
+NVXX_TO_UV_AVX512 nv21
 %endif
 %endif ; ARCH_X86_64
