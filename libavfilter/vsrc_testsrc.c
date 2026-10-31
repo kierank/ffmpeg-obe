@@ -1332,8 +1332,20 @@ static void draw_bar(TestSourceContext *test, const uint8_t color[4],
             ph = h;
         }
 
-        p0 = p = frame->data[plane] + py * linesize + px;
-        memset(p, c, pw);
+        if (plane == 1 && desc->comp[1].plane == desc->comp[2].plane) {
+            /* semi-planar: U and V interleaved in plane 1 */
+            const int u = desc->comp[1].offset, v = desc->comp[2].offset;
+            px *= 2;
+            pw *= 2;
+            p0 = p = frame->data[plane] + py * linesize + px;
+            for (i = 0; i < pw; i += 2) {
+                p[i + u] = color[1];
+                p[i + v] = color[2];
+            }
+        } else {
+            p0 = p = frame->data[plane] + py * linesize + px;
+            memset(p, c, pw);
+        }
         p += linesize;
         for (i = 1; i < ph; i++, p += linesize)
             memcpy(p, p0, pw);
@@ -1346,6 +1358,7 @@ static int smptebars_query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
         AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
+        AV_PIX_FMT_NV12,    AV_PIX_FMT_NV16,
         AV_PIX_FMT_NONE,
     };
 

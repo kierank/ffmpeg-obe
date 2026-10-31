@@ -36,6 +36,15 @@ void ff_lowpass_line_avx (uint8_t *dstp, ptrdiff_t linesize,
 void ff_lowpass_line_complex_sse2(uint8_t *dstp, ptrdiff_t linesize,
                                   const uint8_t *srcp,
                                   ptrdiff_t mref, ptrdiff_t pref);
+void ff_lowpass_line_complex_avx2(uint8_t *dstp, ptrdiff_t linesize,
+                                  const uint8_t *srcp,
+                                  ptrdiff_t mref, ptrdiff_t pref);
+void ff_lowpass_line_avx2  (uint8_t *dstp, ptrdiff_t linesize,
+                            const uint8_t *srcp,
+                            ptrdiff_t mref, ptrdiff_t pref);
+void ff_lowpass_line_avx512(uint8_t *dstp, ptrdiff_t linesize,
+                            const uint8_t *srcp,
+                            ptrdiff_t mref, ptrdiff_t pref);
 
 av_cold void ff_interlace_init_x86(InterlaceContext *s)
 {
@@ -50,4 +59,17 @@ av_cold void ff_interlace_init_x86(InterlaceContext *s)
     if (EXTERNAL_AVX(cpu_flags))
         if (s->lowpass == VLPF_LIN)
             s->lowpass_line = ff_lowpass_line_avx;
+    if (EXTERNAL_AVX2_FAST(cpu_flags)) {
+        if (s->lowpass == VLPF_CMP)
+            s->lowpass_line = ff_lowpass_line_complex_avx2;
+#if ARCH_X86_64
+        else if (s->lowpass == VLPF_LIN)
+            s->lowpass_line = ff_lowpass_line_avx2;
+#endif
+    }
+#if ARCH_X86_64
+    if (EXTERNAL_AVX512(cpu_flags))
+        if (s->lowpass == VLPF_LIN)
+            s->lowpass_line = ff_lowpass_line_avx512;
+#endif
 }
