@@ -505,6 +505,7 @@ switch(c->dstBpc){ \
             c->chrToYV12 = ff_uyvyToUV_mmx;
             break;
         case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_NV16:
             c->chrToYV12 = ff_nv12ToUV_mmx;
             break;
         case AV_PIX_FMT_NV21:
@@ -554,6 +555,7 @@ switch(c->dstBpc){ \
             c->chrToYV12 = ff_uyvyToUV_sse2;
             break;
         case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_NV16:
             c->chrToYV12 = ff_nv12ToUV_sse2;
             break;
         case AV_PIX_FMT_NV21:
@@ -603,6 +605,7 @@ switch(c->dstBpc){ \
             c->chrToYV12 = ff_uyvyToUV_avx;
             break;
         case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_NV16:
             c->chrToYV12 = ff_nv12ToUV_avx;
             break;
         case AV_PIX_FMT_NV21:

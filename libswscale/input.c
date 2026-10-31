@@ -652,6 +652,28 @@ static void nv21ToUV_c(uint8_t *dstU, uint8_t *dstV,
     nvXXtoUV_c(dstV, dstU, src1, width);
 }
 
+static void nv20LEToUV_c(uint8_t *dstU, uint8_t *dstV,
+                         const uint8_t *unused0, const uint8_t *src1, const uint8_t *src2,
+                         int width, uint32_t *unused)
+{
+    int i;
+    for (i = 0; i < width; i++) {
+        AV_WN16(dstU + i * 2, AV_RL16(src1 + i * 4 + 0));
+        AV_WN16(dstV + i * 2, AV_RL16(src1 + i * 4 + 2));
+    }
+}
+
+static void nv20BEToUV_c(uint8_t *dstU, uint8_t *dstV,
+                         const uint8_t *unused0, const uint8_t *src1, const uint8_t *src2,
+                         int width, uint32_t *unused)
+{
+    int i;
+    for (i = 0; i < width; i++) {
+        AV_WN16(dstU + i * 2, AV_RB16(src1 + i * 4 + 0));
+        AV_WN16(dstV + i * 2, AV_RB16(src1 + i * 4 + 2));
+    }
+}
+
 #define input_pixel(pos) (isBE(origin) ? AV_RB16(pos) : AV_RL16(pos))
 
 static void bgr24ToY_c(uint8_t *_dst, const uint8_t *src, const uint8_t *unused1, const uint8_t *unused2,
@@ -878,10 +900,17 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
         c->chrToYV12 = uyvyToUV_c;
         break;
     case AV_PIX_FMT_NV12:
+    case AV_PIX_FMT_NV16:
         c->chrToYV12 = nv12ToUV_c;
         break;
     case AV_PIX_FMT_NV21:
         c->chrToYV12 = nv21ToUV_c;
+        break;
+    case AV_PIX_FMT_NV20LE:
+        c->chrToYV12 = nv20LEToUV_c;
+        break;
+    case AV_PIX_FMT_NV20BE:
+        c->chrToYV12 = nv20BEToUV_c;
         break;
     case AV_PIX_FMT_RGB8:
     case AV_PIX_FMT_BGR8:
@@ -1214,6 +1243,7 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
     case AV_PIX_FMT_YUV420P16LE:
     case AV_PIX_FMT_YUV422P16LE:
     case AV_PIX_FMT_YUV444P16LE:
+    case AV_PIX_FMT_NV20LE:
 
     case AV_PIX_FMT_GRAY16LE:
         c->lumToYV12 = bswap16Y_c;
@@ -1248,6 +1278,7 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
     case AV_PIX_FMT_YUV420P16BE:
     case AV_PIX_FMT_YUV422P16BE:
     case AV_PIX_FMT_YUV444P16BE:
+    case AV_PIX_FMT_NV20BE:
 
     case AV_PIX_FMT_GRAY16BE:
         c->lumToYV12 = bswap16Y_c;
