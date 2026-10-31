@@ -418,6 +418,17 @@ INPUT_FUNCS(sse2);
 INPUT_FUNCS(ssse3);
 INPUT_FUNCS(avx);
 
+#if ARCH_X86_64
+INPUT_UV_FUNC(nv12, avx2);
+INPUT_UV_FUNC(nv21, avx2);
+INPUT_UV_FUNC(nv20LE, avx2);
+INPUT_UV_FUNC(nv20BE, avx2);
+INPUT_Y_FUNC(bswap16, avx2);
+INPUT_UV_FUNC(nv20LE, avx512);
+INPUT_UV_FUNC(nv20BE, avx512);
+INPUT_Y_FUNC(bswap16, avx512);
+#endif
+
 av_cold void ff_sws_init_swscale_x86(SwsContext *c)
 {
     int cpu_flags = av_get_cpu_flags();
@@ -668,6 +679,38 @@ switch(c->dstBpc){ \
         } else {
             ASSIGN_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize, avx2);
             ASSIGN_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize, avx2);
+        }
+
+        switch (c->srcFormat) {
+        case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_NV16:
+            c->chrToYV12 = ff_nv12ToUV_avx2;
+            break;
+        case AV_PIX_FMT_NV21:
+            c->chrToYV12 = ff_nv21ToUV_avx2;
+            break;
+        case AV_PIX_FMT_NV20LE:
+            c->chrToYV12 = ff_nv20LEToUV_avx2;
+            break;
+        case AV_PIX_FMT_NV20BE:
+            c->lumToYV12 = ff_bswap16ToY_avx2;
+            c->chrToYV12 = ff_nv20BEToUV_avx2;
+            break;
+        default:
+            break;
+        }
+    }
+    if (EXTERNAL_AVX512(cpu_flags)) {
+        switch (c->srcFormat) {
+        case AV_PIX_FMT_NV20LE:
+            c->chrToYV12 = ff_nv20LEToUV_avx512;
+            break;
+        case AV_PIX_FMT_NV20BE:
+            c->lumToYV12 = ff_bswap16ToY_avx512;
+            c->chrToYV12 = ff_nv20BEToUV_avx512;
+            break;
+        default:
+            break;
         }
     }
     if (EXTERNAL_AVX512ICL(cpu_flags)) {

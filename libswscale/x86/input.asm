@@ -94,6 +94,15 @@ shuf_rgb_12x4:   db 0, 0x80, 1, 0x80,  2, 0x80,  3, 0x80, \
 shuf_rgb_3x56:   db 2, 0x80, 3, 0x80,  4, 0x80,  5, 0x80, \
                     8, 0x80, 9, 0x80, 10, 0x80, 11, 0x80
 
+; NV20: (word) { U0, V0, ..., U3, V3 } -> { U0, ..., U3, V0, ..., V3 },
+; byteswapping each word for BE
+shuf_nv20LE:     db 0, 1, 4, 5,  8,  9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15
+shuf_nv20BE:     db 1, 0, 5, 4,  9,  8, 13, 12, 3, 2, 7, 6, 11, 10, 15, 14
+shuf_bswap16:    db 1, 0, 3, 2,  5,  4,  7,  6, 9, 8, 11, 10, 13, 12, 15, 14
+; vpermt2q indices picking the U (even) and V (odd) qwords of two vectors
+qidx_even:       db 0, 2, 4, 6, 8, 10, 12, 14
+qidx_odd:        db 1, 3, 5, 7, 9, 11, 13, 15
+
 SECTION .text
 
 ;-----------------------------------------------------------------------------
@@ -738,3 +747,187 @@ YUYV_TO_UV_FN 3, uyvy, 1
 NVXX_TO_UV_FN 5, nv12
 NVXX_TO_UV_FN 5, nv21
 %endif
+
+%if ARCH_X86_64
+;-----------------------------------------------------------------------------
+; NV12/NV21/NV16 chroma, NV20 chroma and byteswapped 16 bit luma, AVX2 and
+; AVX-512.
+;
+; The AVX2 versions read and write up to one vector past w, as the SSE2 ones
+; do; the AVX-512 versions mask the tail and access nothing past w.
+;-----------------------------------------------------------------------------
+
+; %1 = nv12 or nv21
+%macro NVXX_TO_UV_AVX2 1
+cglobal %1ToUV, 4, 5, 6, dstU, dstV, unused, src, w
+    movsxd         wq, dword r5m
+    add         dstUq, wq
+    add         dstVq, wq
+    lea          srcq, [srcq+wq*2]
+    neg            wq
+    pcmpeqb        m5, m5                 ; (byte) { 0xff } x 32
+    psrlw          m5, 8                  ; (word) { 0x00ff } x 16
+.loop:
+    movu           m0, [srcq+wq*2]        ; (byte) { U0, V0, U1, V1, ... }
+    movu           m1, [srcq+wq*2+mmsize] ; (byte) { U16, V16, ... }
+    pand           m2, m0, m5
+    pand           m3, m1, m5
+    psrlw          m0, 8
+    psrlw          m1, 8
+    packuswb       m2, m3                 ; (qword) { U0-7, U16-23, U8-15, U24-31 }
+    packuswb       m0, m1                 ; (qword) { V0-7, V16-23, V8-15, V24-31 }
+    vpermq         m2, m2, q3120
+    vpermq         m0, m0, q3120
+%ifidn %1, nv12
+    movu   [dstUq+wq], m2
+    movu   [dstVq+wq], m0
+%else ; nv21
+    movu   [dstVq+wq], m2
+    movu   [dstUq+wq], m0
+%endif ; nv12/21
+    add            wq, mmsize
+    jl .loop
+    RET
+%endmacro
+
+; %1 = LE or BE
+%macro NV20_TO_UV_AVX2 1
+cglobal nv20%1ToUV, 4, 5, 5, dstU, dstV, unused, src, w
+    movsxd         wq, dword r5m
+    lea         dstUq, [dstUq+wq*2]
+    lea         dstVq, [dstVq+wq*2]
+    lea          srcq, [srcq+wq*4]
+    neg            wq
+    vbroadcasti128 m4, [shuf_nv20%1]
+.loop:
+    movu           m0, [srcq+wq*4]        ; (word) { U0, V0, ..., U7, V7 }
+    movu           m1, [srcq+wq*4+mmsize] ; (word) { U8, V8, ..., U15, V15 }
+    pshufb         m0, m4                 ; (qword) { U0-3, V0-3, U4-7, V4-7 }
+    pshufb         m1, m4                 ; (qword) { U8-11, V8-11, U12-15, V12-15 }
+    punpcklqdq     m2, m0, m1             ; (qword) { U0-3, U8-11, U4-7, U12-15 }
+    punpckhqdq     m0, m1                 ; (qword) { V0-3, V8-11, V4-7, V12-15 }
+    vpermq         m2, m2, q3120
+    vpermq         m0, m0, q3120
+    movu [dstUq+wq*2], m2
+    movu [dstVq+wq*2], m0
+    add            wq, mmsize / 2
+    jl .loop
+    RET
+%endmacro
+
+%macro BSWAP16_TO_Y_AVX2 0
+cglobal bswap16ToY, 5, 5, 3, dst, src, unused1, unused2, w
+    movsxd         wq, wd
+    lea          dstq, [dstq+wq*2]
+    lea          srcq, [srcq+wq*2]
+    neg            wq
+    vbroadcasti128 m2, [shuf_bswap16]
+.loop:
+    movu           m0, [srcq+wq*2]
+    movu           m1, [srcq+wq*2+mmsize]
+    pshufb         m0, m2
+    pshufb         m1, m2
+    movu  [dstq+wq*2], m0
+    movu  [dstq+wq*2+mmsize], m1
+    add            wq, mmsize
+    jl .loop
+    RET
+%endmacro
+
+%if HAVE_AVX2_EXTERNAL
+INIT_YMM avx2
+NVXX_TO_UV_AVX2 nv12
+NVXX_TO_UV_AVX2 nv21
+NV20_TO_UV_AVX2 LE
+NV20_TO_UV_AVX2 BE
+BSWAP16_TO_Y_AVX2
+%endif
+
+; 32 pixels per iteration; the last 1-31 are done with masked loads and
+; stores. %1 = LE or BE
+%macro NV20_TO_UV_AVX512 1
+cglobal nv20%1ToUV, 6, 7, 7, dstU, dstV, tmp1, src, tmp2, w, n
+    movsxd         wq, wd
+    lea         dstUq, [dstUq+wq*2]
+    lea         dstVq, [dstVq+wq*2]
+    lea          srcq, [srcq+wq*4]
+    neg            wq
+    vbroadcasti32x4 m4, [shuf_nv20%1]
+    vpmovzxbq      m5, [qidx_even]
+    vpmovzxbq      m6, [qidx_odd]
+    add            wq, 32
+    jg .tail
+.loop:
+    movu           m0, [srcq+wq*4-128]    ; (word) { U0, V0, ..., U15, V15 }
+    movu           m1, [srcq+wq*4-64]     ; (word) { U16, V16, ..., U31, V31 }
+    pshufb         m0, m4                 ; (qword) { U0-3, V0-3, ..., U12-15, V12-15 }
+    pshufb         m1, m4
+    mova           m2, m0
+    vpermt2q       m0, m5, m1             ; (word) { U0, ..., U31 }
+    vpermt2q       m2, m6, m1             ; (word) { V0, ..., V31 }
+    movu [dstUq+wq*2-64], m0
+    movu [dstVq+wq*2-64], m2
+    add            wq, 32
+    jle .loop
+.tail:
+    sub            wq, 32                 ; -(pixels left)
+    jz .end
+    mov            nd, wd
+    neg            nd
+    mov         tmp1q, -1
+    bzhi        tmp2d, tmp1d, nd
+    kmovd          k3, tmp2d              ; n words of U and of V
+    add            nd, nd
+    bzhi        tmp2q, tmp1q, nq
+    kmovq          k1, tmp2q              ; 2n words of source
+    kshiftrq       k2, k1, 32
+    vmovdqu16      m0{k1}{z}, [srcq+wq*4]
+    vmovdqu16      m1{k2}{z}, [srcq+wq*4+64]
+    pshufb         m0, m4
+    pshufb         m1, m4
+    mova           m2, m0
+    vpermt2q       m0, m5, m1
+    vpermt2q       m2, m6, m1
+    vmovdqu16      [dstUq+wq*2]{k3}, m0
+    vmovdqu16      [dstVq+wq*2]{k3}, m2
+.end:
+    RET
+%endmacro
+
+%macro BSWAP16_TO_Y_AVX512 0
+cglobal bswap16ToY, 5, 6, 2, dst, src, tmp1, tmp2, w, n
+    movsxd         wq, wd
+    lea          dstq, [dstq+wq*2]
+    lea          srcq, [srcq+wq*2]
+    neg            wq
+    vbroadcasti32x4 m1, [shuf_bswap16]
+    add            wq, 32
+    jg .tail
+.loop:
+    movu           m0, [srcq+wq*2-64]
+    pshufb         m0, m1
+    movu  [dstq+wq*2-64], m0
+    add            wq, 32
+    jle .loop
+.tail:
+    sub            wq, 32
+    jz .end
+    mov            nd, wd
+    neg            nd
+    mov         tmp1d, -1
+    bzhi        tmp2d, tmp1d, nd
+    kmovd          k1, tmp2d
+    vmovdqu16      m0{k1}{z}, [srcq+wq*2]
+    pshufb         m0, m1
+    vmovdqu16      [dstq+wq*2]{k1}, m0
+.end:
+    RET
+%endmacro
+
+%if HAVE_AVX512_EXTERNAL
+INIT_ZMM avx512
+NV20_TO_UV_AVX512 LE
+NV20_TO_UV_AVX512 BE
+BSWAP16_TO_Y_AVX512
+%endif
+%endif ; ARCH_X86_64
