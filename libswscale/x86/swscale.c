@@ -375,6 +375,13 @@ VSCALEX_FUNCS(avx2);
  * would take the same vpdpwssd, but it was not the one in the profile */
 VSCALEX_FUNC(9,  avx512icl);
 VSCALEX_FUNC(10, avx512icl);
+/* the use_mmx_vfilter yuv2planeX, see yuv2yuvX.asm */
+#define VSCALEX_FUNC_MMX(opt) \
+void ff_yuv2yuvX_ ## opt(const int16_t *filter, int filterSize, \
+                         const int16_t **src, uint8_t *dest, int dstW, \
+                         const uint8_t *dither, int offset)
+VSCALEX_FUNC_MMX(avx2);
+VSCALEX_FUNC_MMX(avx512);
 #endif
 
 #define VSCALE_FUNC(size, opt) \
@@ -702,6 +709,8 @@ switch(c->dstBpc){ \
     }
     if (EXTERNAL_AVX2_FAST(cpu_flags)) {
         ASSIGN_VSCALEX_FUNC(c->yuv2planeX, avx2, , 1);
+        if (c->use_mmx_vfilter && !(c->flags & SWS_ACCURATE_RND))
+            c->yuv2planeX = ff_yuv2yuvX_avx2;
         if (c->srcBpc > 8) {
             ASSIGN_AVX2_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
             ASSIGN_AVX2_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
@@ -735,6 +744,8 @@ switch(c->dstBpc){ \
         }
     }
     if (EXTERNAL_AVX512(cpu_flags)) {
+        if (c->use_mmx_vfilter && !(c->flags & SWS_ACCURATE_RND))
+            c->yuv2planeX = ff_yuv2yuvX_avx512;
         switch (c->srcFormat) {
         case AV_PIX_FMT_NV20LE:
             c->chrToYV12 = ff_nv20LEToUV_avx512;

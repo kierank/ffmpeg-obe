@@ -96,22 +96,43 @@ static void show_differences_16(const uint16_t *ref, const uint16_t *test, size_
     }
 }
 
+// The yuv2planeX of use_mmx_vfilter: bit exact with the inline asm
+// yuv2yuvX_sse3/mmxext, which round differently from the C version.  The
+// dither is rotated by 3 for any non-zero offset, each pixel starts at
+// (dither + 8 * (filterSize - 1)) >> 4 and adds pmulhw(src, coeff) in 16 bits.
+static void yuv2yuvX_mmx_ref(const int16_t *filter, int filterSize,
+                             const int16_t **src, uint8_t *dest, int dstW,
+                             const uint8_t *dither, int offset)
+{
+    int i, j;
+    for (i = 0; i < dstW; i++) {
+        int16_t val = (int16_t)(dither[(i + (offset ? 3 : 0)) & 7] + 8 * (filterSize - 1)) >> 4;
+        for (j = 0; j < filterSize; j++)
+            val = (int16_t)(val + ((src[j][i] * filter[j]) >> 16));
+        dest[i] = av_clip_uint8(val >> 3);
+    }
+}
+
 static void check_yuv2yuvX(int accurate, int bpc, enum AVPixelFormat dstFormat)
 {
     struct SwsContext *c;
-    int fsi, osi, isi, i, j;
+    int fsi, osi, isi, i, j, mis;
     int dstW;
-#define LARGEST_FILTER 16
-    // ff_yuv2planeX_8_sse2 can't handle odd filter sizes
-    const int filter_sizes[] = {2, 4, 8, 16};
+#define LARGEST_FILTER 34
+    // ff_yuv2planeX_8_sse2 can't handle odd filter sizes; 18 and 34 are
+    // thumbnail ones
+    const int filter_sizes[] = {2, 4, 6, 8, 16, 18, 34};
     const int FILTER_SIZES = sizeof(filter_sizes)/sizeof(filter_sizes[0]);
-#define LARGEST_INPUT_SIZE 512
+#define LARGEST_INPUT_SIZE 2048
+#define DST_SIZE (LARGEST_INPUT_SIZE + 64)
     // 17 and 129 leave a single pixel over for the tail of the wider scalers,
-    // 24 a whole unit of 8, the rest nothing at all.  The width is taken down
-    // by the offset, which covers the sizes in between as well.
-    static const int input_sizes[] = {8, 17, 24, 128, 129, 144, 256, 512};
-    // the only two offsets swscale.c ever passes, one per chroma plane
-    static const int offsets[] = {0, 3};
+    // 24 a whole unit of 8, 120/240 and 720-1920 are the obed widths.  The
+    // width is taken down by the offset, which covers the sizes in between.
+    static const int input_sizes[] = {8, 17, 24, 120, 128, 129, 144, 240, 256,
+                                      512, 720, 960, 1280, 1920};
+    // 0 and 3 are what swscale.c passes for the non-mmx functions; with the
+    // mmx filter the V plane passes c->uv_offx2 >> 1, which 37 stands for
+    static const int offsets[] = {0, 3, 37};
     const char *accurate_str = (accurate) ? "accurate" : "approximate";
     // only the 8 bit output has an mmx vfilter to dodge; the 9 and 10 bit
     // functions are exact and take the plain filter in both rounding modes,
@@ -123,18 +144,20 @@ static void check_yuv2yuvX(int accurate, int bpc, enum AVPixelFormat dstFormat)
                       int dstW, const uint8_t *dither, int offset);
 
     const int16_t **src;
-    LOCAL_ALIGNED_16(int16_t, src_pixels, [LARGEST_FILTER * LARGEST_INPUT_SIZE]);
+    int16_t  *src_pixels = av_malloc(LARGEST_FILTER * LARGEST_INPUT_SIZE * sizeof(int16_t));
+    uint16_t *dst0 = av_malloc(DST_SIZE * sizeof(uint16_t));
+    uint16_t *dst1 = av_malloc(DST_SIZE * sizeof(uint16_t));
     LOCAL_ALIGNED_16(int16_t, filter_coeff, [LARGEST_FILTER]);
-    LOCAL_ALIGNED_16(uint16_t, dst0, [LARGEST_INPUT_SIZE]);
-    LOCAL_ALIGNED_16(uint16_t, dst1, [LARGEST_INPUT_SIZE]);
     LOCAL_ALIGNED_16(uint8_t, dither, [8]);
     union VFilterData{
         const int16_t *src;
         uint16_t coeff[8];
     } *vFilterData;
-    // eight distinct values, so that the offset rotation is covered.  This is
-    // only sound because the offsets tested are the 0 and 3 of the API: the
-    // asm rotates the dither by 3 for any non-zero offset.
+    if (!src_pixels || !dst0 || !dst1) {
+        fail();
+        goto end;
+    }
+    // eight distinct values, so that the offset rotation is covered
     randomize_buffers(dither, 8);
     randomize_buffers((uint8_t*)src_pixels, LARGEST_FILTER * LARGEST_INPUT_SIZE * sizeof(int16_t));
     c = sws_alloc_context();
@@ -150,6 +173,10 @@ static void check_yuv2yuvX(int accurate, int bpc, enum AVPixelFormat dstFormat)
         dstW = input_sizes[isi];
         for(osi = 0; osi < FF_ARRAY_ELEMS(offsets); ++osi){
             int offset = offsets[osi];
+            // the others rotate the dither by 3 for any non-zero offset as well,
+            // but the C version by the offset itself
+            if (offset >= dstW || (offset > 3 && !c->use_mmx_vfilter))
+                continue;
             for (fsi = 0; fsi < FILTER_SIZES; ++fsi) {
                 // Generate filter coefficients for the given filter size,
                 // with some properties:
@@ -176,46 +203,56 @@ static void check_yuv2yuvX(int accurate, int bpc, enum AVPixelFormat dstFormat)
                     for(j = 0; j < 4; ++j)
                         vFilterData[i].coeff[j + 4] = filter_coeff[i];
                 }
-                if (check_func(c->yuv2planeX, "yuv2yuvX_%d_%d_%d_%d_%s", bpc, filter_sizes[fsi], offset, dstW, accurate_str)) {
+                // the mmx versions take another path for an unaligned dest
+                // (the 9 and 10 bit sse2 ones store aligned, as their dest always is)
+                for (mis = 0; mis < 1 + (bpc == 8); mis++) {
+                if (check_func(c->yuv2planeX, "yuv2yuvX_%d_%d_%d_%d_%s%s", bpc, filter_sizes[fsi], offset, dstW, accurate_str, mis ? "_unaligned" : "")) {
                     // use vFilterData for the mmx function
                     const int16_t *filter = c->use_mmx_vfilter ? (const int16_t*)vFilterData : &filter_coeff[0];
                     int px      = dstW - offset;
                     // the scalers work in units of 16 pixels and may run into the
                     // last one, but no further
                     int written = FFALIGN(px, 16);
-                    memset(dst0, 0, LARGEST_INPUT_SIZE * sizeof(dst0[0]));
-                    memset(dst1, 0, LARGEST_INPUT_SIZE * sizeof(dst1[0]));
+                    uint8_t *d0 = (uint8_t*)dst0 + mis * pixel_size;
+                    uint8_t *d1 = (uint8_t*)dst1 + mis * pixel_size;
+                    memset(dst0, 0, DST_SIZE * sizeof(dst0[0]));
+                    memset(dst1, 0, DST_SIZE * sizeof(dst1[0]));
 
                     if (bpc == 8) {
                         // We can't use call_ref here, because we don't know if use_mmx_vfilter was set for that
                         // function or not, so we can't pass it the parameters correctly.
-                        yuv2planeX_8_ref(&filter_coeff[0], filter_sizes[fsi], src, (uint8_t*)dst0, px, dither, offset);
-                        call_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, px, dither, offset);
+                        if (c->use_mmx_vfilter)
+                            yuv2yuvX_mmx_ref(&filter_coeff[0], filter_sizes[fsi], src, d0, px, dither, offset);
+                        else
+                            yuv2planeX_8_ref(&filter_coeff[0], filter_sizes[fsi], src, d0, px, dither, offset);
+                        call_new(filter, filter_sizes[fsi], src, d1, px, dither, offset);
 
-                        if (cmp_off_by_n_8((uint8_t*)dst0, (uint8_t*)dst1, px, accurate ? 0 : 2)) {
+                        // the mmx rounding is its own, but exact
+                        if (cmp_off_by_n_8(d0, d1, px, accurate || c->use_mmx_vfilter ? 0 : 2)) {
                             fail();
-                            printf("failed: yuv2yuvX_%d_%d_%d_%d_%s\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str);
-                            show_differences_8((uint8_t*)dst0, (uint8_t*)dst1, px);
+                            printf("failed: yuv2yuvX_%d_%d_%d_%d_%s%s\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str, mis ? " unaligned" : "");
+                            show_differences_8(d0, d1, px);
                         }
                     } else {
-                        call_ref(filter, filter_sizes[fsi], src, (uint8_t*)dst0, px, dither, offset);
-                        call_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, px, dither, offset);
+                        call_ref(filter, filter_sizes[fsi], src, d0, px, dither, offset);
+                        call_new(filter, filter_sizes[fsi], src, d1, px, dither, offset);
 
-                        if (cmp_off_by_n_16(dst0, dst1, px, 0)) {
+                        if (memcmp(d0, d1, px * 2)) {
                             fail();
-                            printf("failed: yuv2yuvX_%d_%d_%d_%d_%s\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str);
-                            show_differences_16(dst0, dst1, px);
+                            printf("failed: yuv2yuvX_%d_%d_%d_%d_%s%s\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str, mis ? " unaligned" : "");
+                            show_differences_16(dst0, dst1, px + mis);
                         }
                     }
 
-                    if (cmp_off_by_n_8((uint8_t*)dst0 + written * pixel_size, (uint8_t*)dst1 + written * pixel_size,
-                                       LARGEST_INPUT_SIZE * sizeof(dst0[0]) - written * pixel_size, 0)) {
+                    if (cmp_off_by_n_8(d0 + written * pixel_size, d1 + written * pixel_size,
+                                       DST_SIZE * sizeof(dst0[0]) - (written + mis) * pixel_size, 0)) {
                         fail();
                         printf("failed: yuv2yuvX_%d_%d_%d_%d_%s wrote past dstW\n", bpc, filter_sizes[fsi], offset, dstW, accurate_str);
                     }
 
-                    if (dstW == LARGEST_INPUT_SIZE)
-                        bench_new(filter, filter_sizes[fsi], src, (uint8_t*)dst1, px, dither, offset);
+                    if ((dstW == 512 || dstW == 240 || dstW == 1920) && !offset && !mis)
+                        bench_new(filter, filter_sizes[fsi], src, d1, px, dither, offset);
+                }
                 }
                 av_freep(&src);
                 av_freep(&vFilterData);
@@ -223,10 +260,14 @@ static void check_yuv2yuvX(int accurate, int bpc, enum AVPixelFormat dstFormat)
         }
     }
     sws_freeContext(c);
+end:
+    av_free(src_pixels);
+    av_free(dst0);
+    av_free(dst1);
 #undef LARGEST_INPUT_SIZE
 #undef LARGEST_FILTER
+#undef DST_SIZE
 }
-
 #define MAX_DST_W 1920
 #define MAX_FILTER_WIDTH 40
 // rounded up: randomize_buffers() writes in units of four bytes
