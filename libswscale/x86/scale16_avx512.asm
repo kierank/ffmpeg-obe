@@ -363,6 +363,11 @@ cglobal hscale%1to%2_8, 6, 8, 15, pos0, dst, w, src, filter, fltpos, pos1, cnt
 %macro X16_PIXEL_ICL 3
     movsxd      posq, dword [fltposq+%2*4]
     lea         posq, [srcq+posq*2]
+    ; masked loads do not train the hardware prefetcher (Zen 5): a line
+    ; fresh from memory is ~2x slower without this
+%if %2 == 0
+    prefetcht0  [posq+512]
+%endif
     vmovdqu16   ym%1{k1}{z}, [posq+lastoffq]
 %if src_width == 16
     vpsubw      ym%1{k1}{z}, ym%1, ym12

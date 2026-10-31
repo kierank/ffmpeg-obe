@@ -468,6 +468,11 @@ SCALE8_X_FUNC 19, X8
 %macro X8_PIXEL_AVX2 3
     movsxd      posq, dword [fltposq+%2*4]
     add         posq, srcq
+    ; masked loads do not train the hardware prefetcher (Zen 5): a line
+    ; fresh from memory is ~2x slower without this
+%if %2 == 0
+    prefetcht0  [posq+256]
+%endif
     vpmaskmovd   xm10, xm8, [posq+lastoffq]
     pmovzxbw     m%1, xm10
     vpmaskmovd    m10, m9, [filterq+lastoffq*2]
@@ -831,6 +836,11 @@ SCALE8_8_FUNC_ICL 19
 %macro X8_PIXEL_ICL 3
     movsxd      posq, dword [fltposq+%2*4]
     add         posq, srcq
+    ; masked loads do not train the hardware prefetcher (Zen 5): a line
+    ; fresh from memory is ~2x slower without this
+%if %2 == 0
+    prefetcht0  [posq+256]
+%endif
     vmovdqu8    xm14{k1}{z}, [posq+lastoffq]
     vmovdqu16   ym15{k1}{z}, [filterq+lastoffq*2]
     pmovzxbw    ym%1, xm14

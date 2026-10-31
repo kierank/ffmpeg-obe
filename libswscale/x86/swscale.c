@@ -678,14 +678,17 @@ switch(c->dstBpc){ \
              break; \
     }
     /* avx512icl, as measured on Zen 5 against avx2: the 8 tap kernels (of
-     * both input widths) are slower there and stay unused, as does the 9-16
-     * bit X4 kernel from 20 taps up; X4 at 12 taps is ~1.5x, X8 a few % */
+     * both input widths) are slower there and stay unused, as do the 9-16
+     * bit X kernels above 16 taps, which are no faster in checkasm and slower
+     * on lines fresh from memory (the thumbnail of 10 bit 1080p); at 12 taps
+     * they are ~1.5x */
 #define ASSIGN_ICL_SCALE_FUNC(hscalefn, filtersize) \
     switch (filtersize) { \
     case 4: ASSIGN_SCALE_FUNC2_16(hscalefn, 4, avx512icl); break; \
     case 8: break; \
-    default: if (!(filtersize & 4))  ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx512icl); \
-             else if (filtersize < 16) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx512icl); \
+    default: if (filtersize > 16)  break; \
+             if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx512icl); \
+             else                ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx512icl); \
              break; \
     }
 #define ASSIGN_ICL_8BIT_SCALE_FUNC(hscalefn, filtersize) \
