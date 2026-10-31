@@ -371,8 +371,7 @@ VSCALEX_FUNC(16, sse4);
 VSCALEX_FUNCS(avx);
 #if ARCH_X86_64
 VSCALEX_FUNCS(avx2);
-/* the 8 bit output has no avx512 version; its inner loop is the same shape and
- * would take the same vpdpwssd, but it was not the one in the profile */
+VSCALEX_FUNC(8,  avx512icl);
 VSCALEX_FUNC(9,  avx512icl);
 VSCALEX_FUNC(10, avx512icl);
 /* the use_mmx_vfilter yuv2planeX, see yuv2yuvX.asm */
@@ -762,6 +761,7 @@ switch(c->dstBpc){ \
         switch (c->dstBpc) {
         case 10: if (!isBE(c->dstFormat)) c->yuv2planeX = ff_yuv2planeX_10_avx512icl; break;
         case 9:  if (!isBE(c->dstFormat)) c->yuv2planeX = ff_yuv2planeX_9_avx512icl;  break;
+        case 8:  if (!c->use_mmx_vfilter)  c->yuv2planeX = ff_yuv2planeX_8_avx512icl;  break;
         }
         if (c->srcBpc > 8) {
             ASSIGN_ICL_SCALE_FUNC(c->hyScale, c->hLumFilterSize);

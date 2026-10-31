@@ -36,6 +36,9 @@ pw_16:         times 8 dw 16
 pw_32:         times 8 dw 32
 pw_512:        times 8 dw 512
 pw_1024:       times 8 dw 1024
+; the packs of the 512 bit 8 bit output leave the qwords of 0-31 and 32-63
+; interleaved per lane
+pack_order:    dq 0, 2, 4, 6, 1, 3, 5, 7
 
 SECTION .text
 
@@ -628,6 +631,117 @@ cglobal yuv2planeX_%1, 5, 10, 16, filter, fltsize, src, dst, w
 
 yuv2planeX_avx512icl_fn  9
 yuv2planeX_avx512icl_fn 10
+
+; 8 bit output, 64 pixels per iteration, with vpdpwssd as for 9/10 bits.  The
+; dither, shifted up by 12, starts the accumulators as in the avx2 version;
+; it has period 8, which a 128 bit lane holds, so the broadcast and the in-lane
+; rotation work at 512 bits too.  The two packs leave the qwords of pixels 0-31
+; and 32-63 interleaved per lane, and one vpermq sorts them.  The tail is one
+; masked pass, so exactly dstW pixels are written.
+cglobal yuv2planeX_8, 7, 11, 13, filter, fltsize, src, dst, w, dither, offset, x, line, cnt, tmp
+    vpbroadcastq    m9, [ditherq]
+    test       offsetd, offsetd
+    jz .no_rot
+    PALIGNR         m9, m9, 3, m0
+.no_rot:
+    pxor            m6, m6
+    punpcklbw       m9, m6
+    punpcklwd       m8, m9, m6              ; px 0-3 of each lane
+    punpckhwd       m9, m6                  ; px 4-7
+    pslld           m8, 12
+    pslld           m9, 12
+    movu           m10, [pack_order]
+
+    movsxd          wq, wd
+    xor             xq, xq
+    cmp             wq, 64
+    jl .tail
+
+.pixelloop:
+    mova            m1, m8
+    mova            m2, m9
+    mova            m3, m8
+    mova            m4, m9
+    movsxd        cntq, fltsized
+.filterloop:
+    mov          lineq, [srcq+gprsize*cntq-2*gprsize]
+    movu            m5, [lineq+xq*2]
+    movu            m6, [lineq+xq*2+mmsize]
+    mov          lineq, [srcq+gprsize*cntq-gprsize]
+    movu            m7, [lineq+xq*2]
+    movu           m11, [lineq+xq*2+mmsize]
+    vpbroadcastd    m0, [filterq+2*cntq-4]  ; coeff[0], coeff[1]
+    punpcklwd      m12, m5, m7
+    punpckhwd       m5, m7
+    vpdpwssd        m1, m12, m0
+    vpdpwssd        m2, m5, m0
+    punpcklwd      m12, m6, m11
+    punpckhwd       m6, m11
+    vpdpwssd        m3, m12, m0
+    vpdpwssd        m4, m6, m0
+    sub           cntq, 2
+    jg .filterloop
+
+    psrad           m1, 19
+    psrad           m2, 19
+    psrad           m3, 19
+    psrad           m4, 19
+    packssdw        m1, m2                  ; px 0-31
+    packssdw        m3, m4                  ; px 32-63
+    packuswb        m1, m3
+    vpermq          m1, m10, m1
+    movu    [dstq+xq], m1
+
+    add             xq, 64
+    sub             wq, 64
+    cmp             wq, 64
+    jge .pixelloop
+
+    test            wq, wq
+    jle .end
+
+    ; 1-63 pixels left, or dstW < 64 to start with
+.tail:
+    mov           tmpq, -1
+    bzhi          tmpq, tmpq, wq
+    kmovq           k3, tmpq                ; bytes of output
+    kmovq           k1, tmpq                ; words of px 0-31
+    kshiftrq        k2, k1, 32              ; words of px 32-63
+    mova            m1, m8
+    mova            m2, m9
+    mova            m3, m8
+    mova            m4, m9
+    movsxd        cntq, fltsized
+.tailfilterloop:
+    mov          lineq, [srcq+gprsize*cntq-2*gprsize]
+    vmovdqu16       m5{k1}{z}, [lineq+xq*2]
+    vmovdqu16       m6{k2}{z}, [lineq+xq*2+mmsize]
+    mov          lineq, [srcq+gprsize*cntq-gprsize]
+    vmovdqu16       m7{k1}{z}, [lineq+xq*2]
+    vmovdqu16      m11{k2}{z}, [lineq+xq*2+mmsize]
+    vpbroadcastd    m0, [filterq+2*cntq-4]
+    punpcklwd      m12, m5, m7
+    punpckhwd       m5, m7
+    vpdpwssd        m1, m12, m0
+    vpdpwssd        m2, m5, m0
+    punpcklwd      m12, m6, m11
+    punpckhwd       m6, m11
+    vpdpwssd        m3, m12, m0
+    vpdpwssd        m4, m6, m0
+    sub           cntq, 2
+    jg .tailfilterloop
+
+    psrad           m1, 19
+    psrad           m2, 19
+    psrad           m3, 19
+    psrad           m4, 19
+    packssdw        m1, m2
+    packssdw        m3, m4
+    packuswb        m1, m3
+    vpermq          m1, m10, m1
+    vmovdqu8 [dstq+xq]{k3}, m1
+.end:
+    RET
 %endif
 
 ; %1=outout-bpc, %2=alignment (u/a)
