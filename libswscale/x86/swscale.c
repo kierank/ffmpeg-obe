@@ -673,7 +673,10 @@ switch(c->dstBpc){ \
     switch (filtersize) { \
     case 4: ASSIGN_SCALE_FUNC2_16(hscalefn, 4, avx2); break; \
     case 8: ASSIGN_SCALE_FUNC2_16(hscalefn, 8, avx2); break; \
-    default: if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx2); \
+    /* 12 taps stays on ssse3/sse4: X4_avx2 is 0.82-0.89x of them there on \
+     * Raptor Cove */ \
+    default: if (filtersize == 12) break; \
+             if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx2); \
              else                ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx2); \
              break; \
     }
