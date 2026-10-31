@@ -706,7 +706,7 @@ switch(c->dstBpc){ \
             c->chrToYV12 = ff_nv20LEToUV_avx512;
             break;
         case AV_PIX_FMT_NV20BE:
-            c->lumToYV12 = ff_bswap16ToY_avx512;
+            /* ff_bswap16ToY_avx512 is 1.4x slower than avx2 on Zen 4 */
             c->chrToYV12 = ff_nv20BEToUV_avx512;
             break;
         default:
