@@ -140,6 +140,7 @@ static const struct {
     #endif
 #endif
 #if CONFIG_SWSCALE
+    { "sw_input", checkasm_check_sw_input },
     { "sw_scale", checkasm_check_sw_scale },
 #endif
 #if CONFIG_AVUTIL

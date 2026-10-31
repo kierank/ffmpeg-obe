@@ -34,7 +34,8 @@ AVFILTEROBJS-$(CONFIG_COLORSPACE_FILTER) += vf_colorspace.o
 CHECKASMOBJS-$(CONFIG_AVFILTER) += $(AVFILTEROBJS-yes)
 
 # libswscale tests
-SWSCALEOBJS                             += sw_scale.o
+SWSCALEOBJS                             += sw_input.o \
+                                           sw_scale.o
 
 CHECKASMOBJS-$(CONFIG_SWSCALE)          += $(SWSCALEOBJS)
 
