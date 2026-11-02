@@ -265,9 +265,10 @@ static void filter(AVFilterContext *ctx, AVFrame *dstpic,
     BWDIFContext *bwdif = ctx->priv;
     YADIFContext *yadif = &bwdif->yadif;
     ThreadData td = { .frame = dstpic, .parity = parity, .tff = tff };
+    int nb_planes = av_pix_fmt_count_planes(dstpic->format);
     int i;
 
-    for (i = 0; i < yadif->csp->nb_components; i++) {
+    for (i = 0; i < nb_planes; i++) {
         int w = dstpic->width;
         int h = dstpic->height;
 
@@ -275,6 +276,10 @@ static void filter(AVFilterContext *ctx, AVFrame *dstpic,
             w = AV_CEIL_RSHIFT(w, yadif->csp->log2_chroma_w);
             h = AV_CEIL_RSHIFT(h, yadif->csp->log2_chroma_h);
         }
+        /* interleaved U/V: the filter is vertical only, so a row of w pairs
+         * is a row of 2 * w samples */
+        if (i == 1 && yadif->csp->comp[1].plane == yadif->csp->comp[2].plane)
+            w *= 2;
 
         td.w     = w;
         td.h     = h;
@@ -319,6 +324,8 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
         AV_PIX_FMT_GBRAP, AV_PIX_FMT_GBRAP16,
         AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAY16,
+        AV_PIX_FMT_NV12, AV_PIX_FMT_NV16,
+        AV_PIX_FMT_NV20LE, AV_PIX_FMT_NV12_10LE,
         AV_PIX_FMT_NONE
     };
 
