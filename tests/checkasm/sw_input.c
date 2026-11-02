@@ -52,11 +52,12 @@ static const struct {
     enum AVPixelFormat fmt;
     const char *name;
 } formats[] = {
-    { AV_PIX_FMT_NV12,   "nv12"   },
-    { AV_PIX_FMT_NV21,   "nv21"   },
-    { AV_PIX_FMT_NV16,   "nv16"   },
-    { AV_PIX_FMT_NV20LE, "nv20le" },
-    { AV_PIX_FMT_NV20BE, "nv20be" },
+    { AV_PIX_FMT_NV12,      "nv12"      },
+    { AV_PIX_FMT_NV21,      "nv21"      },
+    { AV_PIX_FMT_NV16,      "nv16"      },
+    { AV_PIX_FMT_NV20LE,    "nv20le"    },
+    { AV_PIX_FMT_NV20BE,    "nv20be"    },
+    { AV_PIX_FMT_NV12_10LE, "nv12_10le" },
 };
 
 static int width(int i)
