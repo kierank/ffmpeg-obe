@@ -46,6 +46,9 @@ gray16le            f96cfb5652b090dad52615930f0ce65f
 monob               f01cb0b623357387827902d9d0963435
 monow               35c68b86c226d6990b2dcb573a05ff6b
 nv12                b118d24a3653fe66e5d9e079033aef79
+nv12_10le           a6b5420a3ae461dcb5b9697500c4ebd1
+nv16                68e757396b62b84aad657274b8f6ce15
+nv20le              011d1e266e52e9587b0f257ab4533095
 nv21                c74bb1c10dbbdee8a1f682b194486c4d
 p010be              1d6726d94bf1385996a9a9840dd0e878
 p010le              4b316f2b9e18972299beb73511278fa8
