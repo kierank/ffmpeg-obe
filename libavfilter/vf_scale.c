@@ -316,12 +316,15 @@ static int config_props(AVFilterLink *outlink)
             }
             /* Override YUV420P default settings to have the correct (MPEG-2) chroma positions
              * MPEG-2 chroma positions are used by convention
+             * NV12 is YUV420P with the chroma interleaved, so it gets the same
              * XXX: support other 4:2:0 pixel formats */
-            if (inlink0->format == AV_PIX_FMT_YUV420P && scale->in_v_chr_pos == -513) {
+            if ((inlink0->format == AV_PIX_FMT_YUV420P || inlink0->format == AV_PIX_FMT_NV12) &&
+                scale->in_v_chr_pos == -513) {
                 in_v_chr_pos = (i == 0) ? 128 : (i == 1) ? 64 : 192;
             }
 
-            if (outlink->format == AV_PIX_FMT_YUV420P && scale->out_v_chr_pos == -513) {
+            if ((outlink->format == AV_PIX_FMT_YUV420P || outlink->format == AV_PIX_FMT_NV12) &&
+                scale->out_v_chr_pos == -513) {
                 out_v_chr_pos = (i == 0) ? 128 : (i == 1) ? 64 : 192;
             }
 

@@ -690,6 +690,7 @@ switch(c->dstBpc){ \
             c->chrToYV12 = ff_nv21ToUV_avx2;
             break;
         case AV_PIX_FMT_NV20LE:
+        case AV_PIX_FMT_NV12_10LE:
             c->chrToYV12 = ff_nv20LEToUV_avx2;
             break;
         case AV_PIX_FMT_NV20BE:
@@ -703,6 +704,7 @@ switch(c->dstBpc){ \
     if (EXTERNAL_AVX512(cpu_flags)) {
         switch (c->srcFormat) {
         case AV_PIX_FMT_NV20LE:
+        case AV_PIX_FMT_NV12_10LE:
             c->chrToYV12 = ff_nv20LEToUV_avx512;
             break;
         case AV_PIX_FMT_NV20BE:

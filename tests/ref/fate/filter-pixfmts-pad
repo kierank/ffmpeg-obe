@@ -20,6 +20,9 @@ gray10le            fcec0e9ca335941047bf624d3ad39765
 gray12le            f9ebea57dd9931fd833a278f2e5fa38b
 gray16le            468bda6155bdc7a7a20c34d6e599fd16
 nv12                381574979cb04be10c9168540310afad
+nv12_10le           3be4761dafb6016062836a78a9dffeb4
+nv16                d3a50501d2ea8535489fd5ec49e7866d
+nv20le              bf5a292193f5c15892586aad2b6217e9
 nv21                0fdeb2cdd56cf5a7147dc273456fa217
 rgb0                78d500c8361ab6423a4826a00268c908
 rgb24               17f9e2e0c609009acaf2175c42d4a2a5
