@@ -2162,6 +2162,18 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .name = "d3d11",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
+    [AV_PIX_FMT_NV12_10LE] = {
+        .name = "nv12_10le",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 2, 0, 0, 10, 1, 9, 1 },        /* Y */
+            { 1, 4, 0, 0, 10, 3, 9, 1 },        /* U */
+            { 1, 4, 2, 0, 10, 3, 9, 3 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR,
+    },
 };
 #if FF_API_PLUS1_MINUS1
 FF_ENABLE_DEPRECATION_WARNINGS
