@@ -193,6 +193,18 @@ static int query_formats(AVFilterContext *ctx)
     return 0;
 }
 
+/* 4:2:0 YUV formats that get the MPEG-2 vertical chroma positions;
+ * YUVJ420P keeps the swscale default (JPEG siting) */
+static int is_mpeg2_420(enum AVPixelFormat fmt)
+{
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
+
+    return desc && fmt != AV_PIX_FMT_YUVJ420P &&
+           desc->log2_chroma_w == 1 && desc->log2_chroma_h == 1 &&
+           !(desc->flags & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_PAL |
+                            AV_PIX_FMT_FLAG_PSEUDOPAL | AV_PIX_FMT_FLAG_HWACCEL));
+}
+
 static const int *parse_yuv_type(const char *s, enum AVColorSpace colorspace)
 {
     if (!s)
@@ -314,17 +326,13 @@ static int config_props(AVFilterLink *outlink)
                         return ret;
                 }
             }
-            /* Override YUV420P default settings to have the correct (MPEG-2) chroma positions
-             * MPEG-2 chroma positions are used by convention
-             * NV12 is YUV420P with the chroma interleaved, so it gets the same
-             * XXX: support other 4:2:0 pixel formats */
-            if ((inlink0->format == AV_PIX_FMT_YUV420P || inlink0->format == AV_PIX_FMT_NV12) &&
-                scale->in_v_chr_pos == -513) {
+            /* Override the 4:2:0 YUV default settings to have the correct (MPEG-2) chroma positions
+             * MPEG-2 chroma positions are used by convention */
+            if (is_mpeg2_420(inlink0->format) && scale->in_v_chr_pos == -513) {
                 in_v_chr_pos = (i == 0) ? 128 : (i == 1) ? 64 : 192;
             }
 
-            if ((outlink->format == AV_PIX_FMT_YUV420P || outlink->format == AV_PIX_FMT_NV12) &&
-                scale->out_v_chr_pos == -513) {
+            if (is_mpeg2_420(outlink->format) && scale->out_v_chr_pos == -513) {
                 out_v_chr_pos = (i == 0) ? 128 : (i == 1) ? 64 : 192;
             }
 
