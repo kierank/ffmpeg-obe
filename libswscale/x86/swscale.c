@@ -333,17 +333,26 @@ SCALE_FUNCS16(4, avx2);
 SCALE_FUNCS16(8, avx2);
 SCALE_FUNCS16(X4, avx2);
 SCALE_FUNCS16(X8, avx2);
-/* only the 4 tap filter, which is the size whose whole iteration fits in a 64
- * sample window; the wider ones stay on avx2 */
-SCALE_FUNCS16(4, avx512icl);
+SCALE_FUNCS16(X4_masked, avx2);
+SCALE_FUNCS16(4,  avx512icl);
+SCALE_FUNCS16(8,  avx512icl);
+SCALE_FUNCS16(X4, avx512icl);
+SCALE_FUNCS16(X8, avx512icl);
 
-/* 8 bit input, where only the 4 tap filter is worth widening: the bytes of one
- * output pixel are a single dword load, so the gain is in the arithmetic and
- * in avx512icl's byte permute, not in the loads */
-SCALE_FUNC(4,  8, 15, avx2);
-SCALE_FUNC(4,  8, 19, avx2);
-SCALE_FUNC(4,  8, 15, avx512icl);
-SCALE_FUNC(4,  8, 19, avx512icl);
+/* 8 bit input */
+#define SCALE_FUNCS8(filter_n, opt) \
+    SCALE_FUNC(filter_n, 8, 15, opt); \
+    SCALE_FUNC(filter_n, 8, 19, opt)
+SCALE_FUNCS8(4,  avx2);
+SCALE_FUNCS8(8,  avx2);
+SCALE_FUNCS8(X4, avx2);
+SCALE_FUNCS8(X8, avx2);
+SCALE_FUNCS8(X4_masked, avx2);
+SCALE_FUNCS8(X8_masked, avx2);
+SCALE_FUNCS8(4,  avx512icl);
+SCALE_FUNCS8(8,  avx512icl);
+SCALE_FUNCS8(X4, avx512icl);
+SCALE_FUNCS8(X8, avx512icl);
 #endif
 
 #define VSCALEX_FUNC(size, opt) \
@@ -364,10 +373,16 @@ VSCALEX_FUNC(16, sse4);
 VSCALEX_FUNCS(avx);
 #if ARCH_X86_64
 VSCALEX_FUNCS(avx2);
-/* the 8 bit output has no avx512 version; its inner loop is the same shape and
- * would take the same vpdpwssd, but it was not the one in the profile */
+VSCALEX_FUNC(8,  avx512icl);
 VSCALEX_FUNC(9,  avx512icl);
 VSCALEX_FUNC(10, avx512icl);
+/* the use_mmx_vfilter yuv2planeX, see yuv2yuvX.asm */
+#define VSCALEX_FUNC_MMX(opt) \
+void ff_yuv2yuvX_ ## opt(const int16_t *filter, int filterSize, \
+                         const int16_t **src, uint8_t *dest, int dstW, \
+                         const uint8_t *dither, int offset)
+VSCALEX_FUNC_MMX(avx2);
+VSCALEX_FUNC_MMX(avx512);
 #endif
 
 #define VSCALE_FUNC(size, opt) \
@@ -425,6 +440,8 @@ INPUT_UV_FUNC(nv20LE, avx2);
 INPUT_UV_FUNC(nv20BE, avx2);
 INPUT_Y_FUNC(bswap16, avx2);
 INPUT_UV_FUNC(nv20LE, avx512);
+INPUT_UV_FUNC(nv12, avx512icl);
+INPUT_UV_FUNC(nv21, avx512icl);
 INPUT_UV_FUNC(nv20BE, avx512);
 INPUT_Y_FUNC(bswap16, avx512);
 #endif
@@ -658,27 +675,77 @@ switch(c->dstBpc){ \
     switch (filtersize) { \
     case 4: ASSIGN_SCALE_FUNC2_16(hscalefn, 4, avx2); break; \
     case 8: ASSIGN_SCALE_FUNC2_16(hscalefn, 8, avx2); break; \
-    /* 12 taps has no whole 16 tap chunk to do, so it stays on ssse3 */ \
-    default: if (filtersize >= 16) { \
-                 if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx2); \
-                 else                ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx2); \
+    /* 12 taps: X4_masked, 1.6-1.9x of ssse3/sse4 on Zen 5; the plain X4 \
+     * is 0.82-0.89x of them there on Raptor Cove */ \
+    default: if (filtersize == 12) { \
+                 ASSIGN_SCALE_FUNC2_16(hscalefn, X4_masked, avx2); \
+                 break; \
              } \
+             if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx2); \
+             else                ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx2); \
              break; \
     }
-    /* 8 bit input, 4 taps: the only filter size the wide kernels cover */
-#define ASSIGN_8BIT_SCALE_FUNC(hscalefn, filtersize, opt) do { \
-    if (filtersize == 4) \
-        hscalefn = c->dstBpc <= 14 ? ff_hscale8to15_4_ ## opt : \
-                                     ff_hscale8to19_4_ ## opt; \
-} while (0)
+    /* avx512icl, as measured on Zen 5 against avx2: the 8 tap kernels (of
+     * both input widths) are slower there and stay unused, as do the 9-16
+     * bit X kernels above 16 taps, which are no faster in checkasm and slower
+     * on lines fresh from memory (the thumbnail of 10 bit 1080p); at 12 taps
+     * they are ~1.5x */
+#define ASSIGN_ICL_SCALE_FUNC(hscalefn, filtersize) \
+    switch (filtersize) { \
+    case 4: ASSIGN_SCALE_FUNC2_16(hscalefn, 4, avx512icl); break; \
+    case 8: break; \
+    default: if (filtersize > 16)  break; \
+             if (filtersize & 4) ASSIGN_SCALE_FUNC2_16(hscalefn, X4, avx512icl); \
+             else                ASSIGN_SCALE_FUNC2_16(hscalefn, X8, avx512icl); \
+             break; \
+    }
+#define ASSIGN_ICL_8BIT_SCALE_FUNC(hscalefn, filtersize) \
+    switch (filtersize) { \
+    case 4: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, 4, avx512icl); break; \
+    case 8: break; \
+    default: if (filtersize & 4) ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4, avx512icl); \
+             else                ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8, avx512icl); \
+             break; \
+    }
+    /* 8 bit input, every filter size */
+#define ASSIGN_8BIT_SCALE_FUNC2(hscalefn, filtersize, opt) \
+        hscalefn = c->dstBpc <= 14 ? ff_hscale8to15_ ## filtersize ## _ ## opt : \
+                                     ff_hscale8to19_ ## filtersize ## _ ## opt
+#define ASSIGN_8BIT_SCALE_FUNC(hscalefn, filtersize, opt) \
+    switch (filtersize) { \
+    case 4:  ASSIGN_8BIT_SCALE_FUNC2(hscalefn, 4, opt); break; \
+    case 8:  ASSIGN_8BIT_SCALE_FUNC2(hscalefn, 8, opt); break; \
+    default: if (filtersize & 4) ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4, opt); \
+             else                ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8, opt); \
+             break; \
+    }
+    /* 8 bit input, the sizes where the masked kernels beat the plain ones
+     * consistently on Raptor Cove (plain/masked over 5 runs): 12 1.57-1.73x,
+     * 16 1.06x, 28 1.38-1.39x, 32 1.05-1.06x; over 20 runs, 20 1.07-1.08x and
+     * 24 1.07-1.08x (both about half that at 1280/1920 wide).  40 is
+     * 0.97-0.99x, slower at width, so it keeps the plain X8. */
+#define ASSIGN_8BIT_MASKED_SCALE_FUNC(hscalefn, filtersize) \
+    switch (filtersize) { \
+    case 12: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
+    case 16: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
+    case 20: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
+    case 24: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
+    case 28: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X4_masked, avx2); break; \
+    case 32: ASSIGN_8BIT_SCALE_FUNC2(hscalefn, X8_masked, avx2); break; \
+    default: break; \
+    }
     if (EXTERNAL_AVX2_FAST(cpu_flags)) {
         ASSIGN_VSCALEX_FUNC(c->yuv2planeX, avx2, , 1);
+        if (c->use_mmx_vfilter && !(c->flags & SWS_ACCURATE_RND))
+            c->yuv2planeX = ff_yuv2yuvX_avx2;
         if (c->srcBpc > 8) {
             ASSIGN_AVX2_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
             ASSIGN_AVX2_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
         } else {
             ASSIGN_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize, avx2);
             ASSIGN_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize, avx2);
+            ASSIGN_8BIT_MASKED_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
+            ASSIGN_8BIT_MASKED_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
         }
 
         switch (c->srcFormat) {
@@ -702,6 +769,8 @@ switch(c->dstBpc){ \
         }
     }
     if (EXTERNAL_AVX512(cpu_flags)) {
+        if (c->use_mmx_vfilter && !(c->flags & SWS_ACCURATE_RND))
+            c->yuv2planeX = ff_yuv2yuvX_avx512;
         switch (c->srcFormat) {
         case AV_PIX_FMT_NV20LE:
         case AV_PIX_FMT_NV12_10LE:
@@ -716,18 +785,28 @@ switch(c->dstBpc){ \
         }
     }
     if (EXTERNAL_AVX512ICL(cpu_flags)) {
+        switch (c->srcFormat) {
+        case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_NV16:
+            c->chrToYV12 = ff_nv12ToUV_avx512icl;
+            break;
+        case AV_PIX_FMT_NV21:
+            c->chrToYV12 = ff_nv21ToUV_avx512icl;
+            break;
+        default:
+            break;
+        }
         switch (c->dstBpc) {
         case 10: if (!isBE(c->dstFormat)) c->yuv2planeX = ff_yuv2planeX_10_avx512icl; break;
         case 9:  if (!isBE(c->dstFormat)) c->yuv2planeX = ff_yuv2planeX_9_avx512icl;  break;
+        case 8:  if (!c->use_mmx_vfilter)  c->yuv2planeX = ff_yuv2planeX_8_avx512icl;  break;
         }
         if (c->srcBpc > 8) {
-            if (c->hLumFilterSize == 4)
-                ASSIGN_SCALE_FUNC2_16(c->hyScale, 4, avx512icl);
-            if (c->hChrFilterSize == 4)
-                ASSIGN_SCALE_FUNC2_16(c->hcScale, 4, avx512icl);
+            ASSIGN_ICL_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
+            ASSIGN_ICL_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
         } else {
-            ASSIGN_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize, avx512icl);
-            ASSIGN_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize, avx512icl);
+            ASSIGN_ICL_8BIT_SCALE_FUNC(c->hyScale, c->hLumFilterSize);
+            ASSIGN_ICL_8BIT_SCALE_FUNC(c->hcScale, c->hChrFilterSize);
         }
     }
 #endif
