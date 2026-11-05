@@ -338,6 +338,187 @@ static void check_yuv2nv12cX(int accurate)
 }
 #undef LARGEST_FILTER
 #undef LARGEST_INPUT_SIZE
+
+typedef void (*yuv2nv_fn)(enum AVPixelFormat dstFormat, const uint8_t *chrDither,
+                          const int16_t *chrFilter, int chrFilterSize,
+                          const int16_t **chrUSrc, const int16_t **chrVSrc,
+                          uint8_t *dest, int dstW);
+
+#define YUV2NV_PROTO(name) \
+    void name(enum AVPixelFormat dstFormat, const uint8_t *chrDither, \
+              const int16_t *chrFilter, int chrFilterSize, \
+              const int16_t **chrUSrc, const int16_t **chrVSrc, \
+              uint8_t *dest, int dstW)
+
+// As the hscale kernels: tested by name as well as through the dispatch, so
+// that the ones not dispatched on this cpu are covered too.  unit is how far
+// the kernel may write past dstW, in pixels: the upstream avx2 one stores 8
+// at a time, the others exactly dstW.
+typedef struct NvKernel {
+    const char *name;
+    yuv2nv_fn fn;
+    int cpu_flag;
+    int bits;
+    int swapped;
+    int unit;
+} NvKernel;
+
+#if ARCH_X86_64 && HAVE_X86ASM
+YUV2NV_PROTO(ff_yuv2nv12cX_avx2);
+YUV2NV_PROTO(ff_yuv2nv21cX_avx2);
+static const NvKernel nv_kernels[] = {
+#if HAVE_AVX2_EXTERNAL
+    { "upstream",        ff_yuv2nv12cX_avx2,           AV_CPU_FLAG_AVX2,       8, 0, 8 },
+    { "upstream",        ff_yuv2nv21cX_avx2,           AV_CPU_FLAG_AVX2,       8, 1, 8 },
+#endif
+    { NULL },
+};
+#else
+static const NvKernel nv_kernels[] = { { NULL } };
+#endif
+
+static void check_yuv2nvcX(enum AVPixelFormat fmt)
+{
+#define NV_MAX_FILTER 16
+#define NV_MAX_W 1024
+// what the kernels may read past dstW in the source lines; swscale leaves
+// more than this after each line
+#define NV_SRC_STRIDE (NV_MAX_W + 64)
+#define NV_DST_SIZE (NV_MAX_W * 4 + 64)
+    static const int filter_sizes[] = { 1, 2, 3, 4, 5, 6, 8, 9, 12, 16 };
+    // tails of every length for 16 and 32 pixel units, a whole unit, and the
+    // chroma widths of 240-1920 wide pictures
+    static const int widths[] = { 1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33,
+                                  47, 63, 64, 65, 120, 180, 240, 360, 640, 960 };
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
+    const int bits    = desc->comp[0].depth;
+    const int swapped = fmt == AV_PIX_FMT_NV21;
+    const int px_size = bits > 8 ? 4 : 2;
+    yuv2planar1_fn p1;
+    yuv2planarX_fn pX;
+    yuv2packed1_fn pk1;
+    yuv2packed2_fn pk2;
+    yuv2packedX_fn pkX;
+    yuv2anyX_fn any;
+    yuv2interleavedX_fn c_fn = NULL;
+    struct SwsContext *c;
+    int fsi, wi, ki, i;
+
+    declare_func_emms(AV_CPU_FLAG_MMX, void, enum AVPixelFormat dstFormat,
+                      const uint8_t *chrDither, const int16_t *chrFilter,
+                      int chrFilterSize, const int16_t **chrUSrc,
+                      const int16_t **chrVSrc, uint8_t *dest, int dstW);
+
+    const int16_t *srcU[NV_MAX_FILTER], *srcV[NV_MAX_FILTER];
+    int16_t *pixU = av_malloc(NV_MAX_FILTER * NV_SRC_STRIDE * sizeof(int16_t));
+    int16_t *pixV = av_malloc(NV_MAX_FILTER * NV_SRC_STRIDE * sizeof(int16_t));
+    uint8_t *dst0 = av_malloc(NV_DST_SIZE);
+    uint8_t *dst1 = av_malloc(NV_DST_SIZE);
+    LOCAL_ALIGNED_16(int16_t, filter, [NV_MAX_FILTER]);
+    LOCAL_ALIGNED_16(uint8_t, dither, [8]);
+
+    if (!pixU || !pixV || !dst0 || !dst1) {
+        fail();
+        goto end;
+    }
+    // eight distinct values, so that a dither applied to the wrong pixel
+    // shows; swscale passes rows of ff_dither_8x8_128 for >8 bit input
+    randomize_buffers(dither, 8);
+    // 15 bit, as the horizontal scalers produce for 8-14 bit output
+    for (i = 0; i < NV_MAX_FILTER * NV_SRC_STRIDE; i++) {
+        pixU[i] = rnd() & 0x7fff;
+        pixV[i] = rnd() & 0x7fff;
+    }
+    for (i = 0; i < NV_MAX_FILTER; i++) {
+        srcU[i] = pixU + i * NV_SRC_STRIDE;
+        srcV[i] = pixV + i * NV_SRC_STRIDE;
+    }
+
+    c = sws_alloc_context();
+    if (sws_init_context(c, NULL, NULL) < 0)
+        fail();
+    c->dstFormat = fmt;
+    c->dstBpc    = bits;
+    ff_sws_init_output_funcs(c, &p1, &pX, &c_fn, &pk1, &pk2, &pkX, &any);
+    ff_getSwsFunc(c);
+    if (!c_fn) {
+        fail();
+        goto done;
+    }
+
+    for (fsi = 0; fsi < FF_ARRAY_ELEMS(filter_sizes); fsi++) {
+        const int fs = filter_sizes[fsi];
+        // as the yuv2yuvX test: negative taps and one large positive one, so
+        // that the output clips at both ends
+        if (fs == 1) {
+            filter[0] = (rnd() % (3 << 12)) - (1 << 12);
+        } else {
+            for (i = 0; i < fs; i++)
+                filter[i] = -((1 << 12) / (fs - 1));
+            filter[rnd() % fs] = (1 << 13) - 1;
+        }
+
+        for (wi = 0; wi < FF_ARRAY_ELEMS(widths); wi++) {
+            const int w = widths[wi];
+            for (ki = -1; ki < 0 || nv_kernels[ki].name; ki++) {
+                const NvKernel *k = ki < 0 ? NULL : &nv_kernels[ki];
+                const char *kname = k ? k->name : "dispatch";
+                int unit = 1;
+                if (k) {
+                    if (k->bits != (bits > 8 ? 10 : 8) || k->swapped != swapped ||
+                        !(av_get_cpu_flags() & k->cpu_flag))
+                        continue;
+                    if (!check_func(k->fn, "yuv2%scX_%d_%d_%s",
+                                    desc->name, fs, w, k->name))
+                        continue;
+                    func_ref = c_fn;
+                    unit = k->unit;
+                } else {
+                    if (!check_func(c->yuv2nv12cX, "yuv2%scX_%d_%d",
+                                    desc->name, fs, w))
+                        continue;
+                    for (i = 0; nv_kernels[i].name; i++)
+                        if (nv_kernels[i].fn == c->yuv2nv12cX)
+                            unit = nv_kernels[i].unit;
+                }
+
+                memset(dst0, 0xAA, NV_DST_SIZE);
+                memset(dst1, 0xAA, NV_DST_SIZE);
+                call_ref(fmt, dither, filter, fs, srcU, srcV, dst0, w);
+                call_new(fmt, dither, filter, fs, srcU, srcV, dst1, w);
+
+                if (memcmp(dst0, dst1, w * px_size)) {
+                    fail();
+                    printf("failed: yuv2%scX_%d_%d %s\n", desc->name, fs, w, kname);
+                    if (bits > 8)
+                        show_differences_16((uint16_t *)dst0, (uint16_t *)dst1, w * 2);
+                    else
+                        show_differences_8(dst0, dst1, w * 2);
+                }
+                if (memcmp(dst0 + FFALIGN(w, unit) * px_size,
+                           dst1 + FFALIGN(w, unit) * px_size,
+                           NV_DST_SIZE - FFALIGN(w, unit) * px_size)) {
+                    fail();
+                    printf("failed: yuv2%scX_%d_%d %s wrote past dstW\n",
+                           desc->name, fs, w, kname);
+                }
+                if ((w == 640 || w == 960) && (fs == 2 || fs == 4 || fs == 8))
+                    bench_new(fmt, dither, filter, fs, srcU, srcV, dst1, w);
+            }
+        }
+    }
+done:
+    sws_freeContext(c);
+end:
+    av_free(pixU);
+    av_free(pixV);
+    av_free(dst0);
+    av_free(dst1);
+#undef NV_MAX_FILTER
+#undef NV_MAX_W
+#undef NV_SRC_STRIDE
+#undef NV_DST_SIZE
+}
 #define MAX_DST_W 1920
 #define MAX_FILTER_WIDTH 40
 // rounded up: randomize_buffers() writes in units of four bytes
@@ -675,4 +856,11 @@ void checkasm_check_sw_scale(void)
     check_yuv2nv12cX(0);
     check_yuv2nv12cX(1);
     report("yuv2nv12cX");
+    check_yuv2nvcX(AV_PIX_FMT_NV12);
+    check_yuv2nvcX(AV_PIX_FMT_NV16);
+    check_yuv2nvcX(AV_PIX_FMT_NV21);
+    report("yuv2nv12cX_8");
+    check_yuv2nvcX(AV_PIX_FMT_NV20LE);
+    check_yuv2nvcX(AV_PIX_FMT_NV12_10LE);
+    report("yuv2nv20cX");
 }
