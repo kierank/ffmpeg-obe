@@ -26,6 +26,7 @@ SECTION_RODATA
 
 pb_flip_byte:  db 15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0
 pb_flip_short: db 14,15,12,13,10,11,8,9,6,7,4,5,2,3,0,1
+pd_flip_dword: dd 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 
 SECTION .text
 
@@ -87,4 +88,88 @@ HFLIP short, w, 2
 INIT_YMM avx2
 HFLIP byte, b, 1
 HFLIP short, w, 2
+%endif
+
+; 4 byte pixels: the interleaved chroma of NV20LE and NV12_10LE (and any
+; other format with a 4 byte step), one vpermd per vector.  src points at the
+; last pixel of the line, as for the functions above, and nothing before the
+; line or after dstW is touched: avx2 does the last 1-7 pixels one at a time,
+; avx512 loads and stores the last unit masked.
+%if ARCH_X86_64
+%macro HFLIP_DWORD 0
+cglobal hflip_dword, 3, 6, 3, src, dst, w, x, tmp, tmp2
+    movsxdifnidn    wq, wd
+    movu            m0, [pd_flip_dword + 64 - mmsize]
+    shl             wq, 2
+    xor             xq, xq
+    ; srcq - xq is the vector whose last pixel is src[-x]
+    sub           srcq, mmsize - 4
+    cmp             wq, 2 * mmsize
+    jl .one
+
+.loop2:
+    neg             xq
+    vpermd          m1, m0, [srcq + xq]
+    vpermd          m2, m0, [srcq + xq - mmsize]
+    neg             xq
+    movu [dstq + xq], m1
+    movu [dstq + xq + mmsize], m2
+    add             xq, 2 * mmsize
+    lea           tmpq, [xq + 2 * mmsize]
+    cmp           tmpq, wq
+    jle .loop2
+
+.one:
+    lea           tmpq, [xq + mmsize]
+    cmp           tmpq, wq
+    jg .tail
+    neg             xq
+    vpermd          m1, m0, [srcq + xq]
+    neg             xq
+    movu [dstq + xq], m1
+    add             xq, mmsize
+
+.tail:
+    cmp             xq, wq
+    jge .end
+%if mmsize == 64
+    ; 1 to 15 pixels: the load takes the top lanes, the store the bottom ones
+    mov           tmpq, wq
+    sub           tmpq, xq
+    shr          tmpd, 2
+    mov          tmp2d, 0xffff
+    bzhi         tmp2d, tmp2d, tmpd
+    kmovw           k2, tmp2d
+    neg          tmpd
+    add          tmpd, 16
+    shlx         tmp2d, tmp2d, tmpd
+    kmovw           k1, tmp2d
+    neg             xq
+    vmovdqu32       m1{k1}{z}, [srcq + xq]
+    neg             xq
+    vpermd          m1, m0, m1
+    vmovdqu32 [dstq + xq]{k2}, m1
+%else
+    add           srcq, mmsize - 4
+.loop1:
+    neg             xq
+    mov          tmpd, [srcq + xq]
+    neg             xq
+    mov [dstq + xq], tmpd
+    add             xq, 4
+    cmp             xq, wq
+    jl .loop1
+%endif
+.end:
+    RET
+%endmacro
+
+%if HAVE_AVX2_EXTERNAL
+INIT_YMM avx2
+HFLIP_DWORD
+%endif
+%if HAVE_AVX512ICL_EXTERNAL
+INIT_ZMM avx512icl
+HFLIP_DWORD
+%endif
 %endif

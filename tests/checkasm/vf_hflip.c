@@ -21,8 +21,8 @@
 #include "libavfilter/hflip.h"
 #include "libavutil/intreadwrite.h"
 
-#define WIDTH 256
-#define WIDTH_PADDED 256 + 32
+#define WIDTH 3840
+#define WIDTH_PADDED 3840 + 64
 
 #define randomize_buffers(buf, size)      \
     do {                                  \
@@ -48,8 +48,8 @@ static void check_hflip(int step, const char * report_name){
     memset(dst_new, 0, WIDTH_PADDED);
     randomize_buffers(src, WIDTH_PADDED);
 
-    if (step == 2) {
-        w /= 2;
+    if (step > 1) {
+        w /= step;
         for (i = 0; i < 4; i++)
             step_array[i] = step;
     }
@@ -60,7 +60,7 @@ static void check_hflip(int step, const char * report_name){
         for (i = 1; i < w; i++) {
             call_ref(src + (w - 1) * step, dst_ref, i);
             call_new(src + (w - 1) * step, dst_new, i);
-            if (memcmp(dst_ref, dst_new, i * step))
+            if (memcmp(dst_ref, dst_new, WIDTH_PADDED))
                 fail();
         }
         bench_new(src + (w - 1) * step, dst_new, w);
@@ -73,4 +73,7 @@ void checkasm_check_vf_hflip(void)
 
     check_hflip(2, "short");
     report("hflip_short");
+
+    check_hflip(4, "dword");
+    report("hflip_dword");
 }
