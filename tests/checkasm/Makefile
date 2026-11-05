@@ -30,6 +30,7 @@ CHECKASMOBJS-$(CONFIG_AVCODEC)          += $(AVCODECOBJS-yes)
 AVFILTEROBJS-$(CONFIG_BLEND_FILTER) += vf_blend.o
 AVFILTEROBJS-$(CONFIG_BWDIF_FILTER)      += vf_bwdif.o
 AVFILTEROBJS-$(CONFIG_COLORSPACE_FILTER) += vf_colorspace.o
+AVFILTEROBJS-$(CONFIG_HFLIP_FILTER)      += vf_hflip.o
 AVFILTEROBJS-$(CONFIG_INTERLACE_FILTER)  += vf_interlace.o
 AVFILTEROBJS-yes                         += drawutils.o
 
