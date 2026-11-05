@@ -453,6 +453,7 @@ void ff_yuv2 ## fmt ## cX_ ## opt(enum AVPixelFormat format, const uint8_t *dith
 
 YUV2NV_DECL(nv12, avx2);
 YUV2NV_DECL(nv21, avx2);
+YUV2NV_DECL(nv20, avx2);
 #endif
 
 av_cold void ff_sws_init_swscale_x86(SwsContext *c)
@@ -827,6 +828,10 @@ switch(c->dstBpc){ \
             break;
         case AV_PIX_FMT_NV21:
             c->yuv2nv12cX = ff_yuv2nv21cX_avx2;
+            break;
+        case AV_PIX_FMT_NV20LE:
+        case AV_PIX_FMT_NV12_10LE:
+            c->yuv2nv12cX = ff_yuv2nv20cX_avx2;
             break;
         default:
             break;

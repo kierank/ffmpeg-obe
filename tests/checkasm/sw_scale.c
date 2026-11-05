@@ -366,10 +366,12 @@ typedef struct NvKernel {
 #if ARCH_X86_64 && HAVE_X86ASM
 YUV2NV_PROTO(ff_yuv2nv12cX_avx2);
 YUV2NV_PROTO(ff_yuv2nv21cX_avx2);
+YUV2NV_PROTO(ff_yuv2nv20cX_avx2);
 static const NvKernel nv_kernels[] = {
 #if HAVE_AVX2_EXTERNAL
     { "upstream",        ff_yuv2nv12cX_avx2,           AV_CPU_FLAG_AVX2,       8, 0, 8 },
     { "upstream",        ff_yuv2nv21cX_avx2,           AV_CPU_FLAG_AVX2,       8, 1, 8 },
+    { "madd",            ff_yuv2nv20cX_avx2,           AV_CPU_FLAG_AVX2,      10, 0, 1 },
 #endif
     { NULL },
 };
