@@ -369,6 +369,9 @@ YUV2NV_PROTO(ff_yuv2nv21cX_avx2);
 YUV2NV_PROTO(ff_yuv2nv12cX_madd_avx2);
 YUV2NV_PROTO(ff_yuv2nv21cX_madd_avx2);
 YUV2NV_PROTO(ff_yuv2nv20cX_avx2);
+YUV2NV_PROTO(ff_yuv2nv12cX_avx512icl);
+YUV2NV_PROTO(ff_yuv2nv21cX_avx512icl);
+YUV2NV_PROTO(ff_yuv2nv20cX_avx512icl);
 static const NvKernel nv_kernels[] = {
 #if HAVE_AVX2_EXTERNAL
     { "upstream",        ff_yuv2nv12cX_avx2,           AV_CPU_FLAG_AVX2,       8, 0, 8 },
@@ -376,6 +379,11 @@ static const NvKernel nv_kernels[] = {
     { "madd",            ff_yuv2nv12cX_madd_avx2,      AV_CPU_FLAG_AVX2,       8, 0, 1 },
     { "madd",            ff_yuv2nv21cX_madd_avx2,      AV_CPU_FLAG_AVX2,       8, 1, 1 },
     { "madd",            ff_yuv2nv20cX_avx2,           AV_CPU_FLAG_AVX2,      10, 0, 1 },
+#endif
+#if HAVE_AVX512ICL_EXTERNAL
+    { "madd",            ff_yuv2nv12cX_avx512icl,      AV_CPU_FLAG_AVX512ICL,  8, 0, 1 },
+    { "madd",            ff_yuv2nv21cX_avx512icl,      AV_CPU_FLAG_AVX512ICL,  8, 1, 1 },
+    { "madd",            ff_yuv2nv20cX_avx512icl,      AV_CPU_FLAG_AVX512ICL, 10, 0, 1 },
 #endif
     { NULL },
 };
