@@ -275,12 +275,11 @@ static void yuv2plane1_8_c(const int16_t *src, uint8_t *dest, int dstW,
     }
 }
 
-static void yuv2nv12cX_c(SwsContext *c, const int16_t *chrFilter, int chrFilterSize,
+static void yuv2nv12cX_c(enum AVPixelFormat dstFormat, const uint8_t *chrDither,
+                        const int16_t *chrFilter, int chrFilterSize,
                         const int16_t **chrUSrc, const int16_t **chrVSrc,
                         uint8_t *dest, int chrDstW)
 {
-    enum AVPixelFormat dstFormat = c->dstFormat;
-    const uint8_t *chrDither = c->chrDither8;
     int i;
 
     if (dstFormat == AV_PIX_FMT_NV12 || dstFormat == AV_PIX_FMT_NV16)
@@ -312,7 +311,8 @@ static void yuv2nv12cX_c(SwsContext *c, const int16_t *chrFilter, int chrFilterS
 }
 
 /* NV20LE/NV12_10LE: yuv2planeX_10LE_c with U and V interleaved */
-static void yuv2nv20cX_c(SwsContext *c, const int16_t *chrFilter, int chrFilterSize,
+static void yuv2nv20cX_c(enum AVPixelFormat dstFormat, const uint8_t *chrDither,
+                         const int16_t *chrFilter, int chrFilterSize,
                          const int16_t **chrUSrc, const int16_t **chrVSrc,
                          uint8_t *dest8, int chrDstW)
 {

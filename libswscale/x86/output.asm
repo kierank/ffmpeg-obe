@@ -2,6 +2,7 @@
 ;* x86-optimized vertical line scaling functions
 ;* Copyright (c) 2011 Ronald S. Bultje <rsbultje@gmail.com>
 ;*                    Kieran Kunhya <kieran@kunhya.com>
+;*           (c) 2020 Nelson Gomez <nelson.gomez@microsoft.com>
 ;*
 ;* This file is part of FFmpeg.
 ;*
@@ -22,7 +23,7 @@
 
 %include "libavutil/x86/x86util.asm"
 
-SECTION_RODATA
+SECTION_RODATA 32
 
 minshort:      times 8 dw 0x8000
 yuv2yuvX_16_start:  times 4 dd 0x4000 - 0x40000000
@@ -34,11 +35,26 @@ pd_4:          times 4 dd 4
 pd_4min0x40000:times 4 dd 4 - (0x40000)
 pw_16:         times 8 dw 16
 pw_32:         times 8 dw 32
+pd_255:        times 8 dd 255
 pw_512:        times 8 dw 512
 pw_1024:       times 8 dw 1024
 ; the packs of the 512 bit 8 bit output leave the qwords of 0-31 and 32-63
 ; interleaved per lane
 pack_order:    dq 0, 2, 4, 6, 1, 3, 5, 7
+
+yuv2nv12_shuffle_mask: times 2 db 0,  4,  8, 12, \
+                                 -1, -1, -1, -1, \
+                                 -1, -1, -1, -1, \
+                                 -1, -1, -1, -1
+yuv2nv21_shuffle_mask: times 2 db 4,  0, 12,  8, \
+                                 -1, -1, -1, -1, \
+                                 -1, -1, -1, -1, \
+                                 -1, -1, -1, -1
+yuv2nv12_permute_mask: dd 0, 4, 1, 2, 3, 5, 6, 7
+yuv2nv12_dither_order: db 0, 3, 1, 4, 2, 5, 3, 6, 4, 7, 5, 0, 6, 1, 7, 2
+
+nv_interleave: db 0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15
+nv20_order:    dq 0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15
 
 SECTION .text
 
@@ -884,3 +900,396 @@ yuv2plane1_fn  9, 5, 3
 yuv2plane1_fn 10, 5, 3
 yuv2plane1_fn 16, 5, 3
 %endif
+
+%undef movsx
+
+;-----------------------------------------------------------------------------
+; AVX2 yuv2nv12cX implementation
+;
+; void ff_yuv2nv12cX_avx2(enum AVPixelFormat format, const uint8_t *dither,
+;                         const int16_t *filter, int filterSize,
+;                         const int16_t **u, const int16_t **v,
+;                         uint8_t *dst, int dstWidth)
+;
+; void ff_yuv2nv21cX_avx2(enum AVPixelFormat format, const uint8_t *dither,
+;                         const int16_t *filter, int filterSize,
+;                         const int16_t **u, const int16_t **v,
+;                         uint8_t *dst, int dstWidth)
+;-----------------------------------------------------------------------------
+
+%if ARCH_X86_64
+%macro yuv2nv12cX_fn 1
+cglobal %1cX, 8, 11, 13, tmp1, dither, filter, filterSize, u, v, dst, dstWidth
+
+    ; resultLo holds u0 v0 u1 v1 u2 v2 u3 v3 and resultHi u4 v4 ... u7 v7,
+    ; and the C dithers u with dither[i & 7] and v with dither[(i + 3) & 7]
+    movq xm0, [ditherq]
+    pshufb xm0, xm0, [yuv2nv12_dither_order]
+    psrldq xm1, xm0, 8
+
+    pmovzxbd m0, xm0
+    pslld m0, m0, 12                        ; ditherLo
+    pmovzxbd m1, xm1
+    pslld m1, m1, 12                        ; ditherHi
+
+    pxor m9, m9                             ; uint8_min dwords
+    mova m10, [pd_255]                      ; uint8_max dwords
+    mova m11, [%1_shuffle_mask]             ; shuffle_mask
+    mova m12, [yuv2nv12_permute_mask]       ; permute mask
+
+    DEFINE_ARGS tmp1, tmp2, filter, filterSize, u, v, dst, dstWidth
+
+    xor r8q, r8q
+
+nv12_outer_%1:
+    mova m2, m0                             ; resultLo
+    mova m3, m1                             ; resultHi
+    xor r9q, r9q
+
+nv12_inner_%1:
+    movsx r10d, word [filterq + (2 * r9q)]
+    movd xm4, r10d
+    vpbroadcastd m4, xm4                    ; filter
+
+    mov tmp1q, [uq + (gprsize * r9q)]
+    mova xm7, oword [tmp1q + 2 * r8q]
+
+    mov tmp2q, [vq + (gprsize * r9q)]
+    mova xm8, oword [tmp2q + 2 * r8q]
+
+    punpcklwd xm5, xm7, xm8
+    pmovsxwd m5, xm5                        ; multiplicandsLo
+    punpckhwd xm6, xm7, xm8
+    pmovsxwd m6, xm6                        ; multiplicandsHi
+
+    pmulld m7, m5, m4                       ; mulResultLo
+    pmulld m8, m6, m4                       ; mulResultHi
+    paddd m2, m2, m7                        ; resultLo += mulResultLo
+    paddd m3, m3, m8                        ; resultHi += mulResultHi
+
+    inc r9d
+    cmp r9d, filterSized
+    jl nv12_inner_%1
+    ; end of inner loop
+
+    psrad m2, m2, 19
+    psrad m3, m3, 19
+
+    ; Vectorized av_clip_uint8
+    pmaxsd m2, m2, m9
+    pmaxsd m3, m3, m9
+    pminsd m2, m2, m10
+    pminsd m3, m3, m10
+
+    ; At this point we have clamped uint8s arranged in this order:
+    ;     m2: u1  0  0  0  v1  0  0  0  [...]
+    ;     m3: u5  0  0  0  v5  0  0  0  [...]
+    ;
+    ; First, we shuffle the bytes to make the bytes semi-contiguous.
+    ; AVX-2 doesn't have cross-lane shuffling, so we'll end up with:
+    ;     m2: u1  v1  u2  v2  0  0  0  0  0  0  0  0  u3  v3  u4  v4
+    ;     m3: u5  v5  u6  v6  0  0  0  0  0  0  0  0  u7  v7  u8  v8
+    pshufb m2, m2, m11
+    pshufb m3, m3, m11
+
+    ; To fix the cross-lane shuffling issue, we'll then use cross-lane
+    ; permutation to combine the two segments
+    vpermd m2, m12, m2
+    vpermd m3, m12, m3
+
+    ; Now we have the final results in the lower 8 bytes of each register
+    movq [dstq], xm2
+    movq [dstq + 8], xm3
+
+    add r8d, 8
+    add dstq, 16
+
+    cmp r8d, dstWidthd
+    jl nv12_outer_%1
+    RET
+%endmacro
+
+%if HAVE_AVX2_EXTERNAL
+INIT_YMM avx2
+yuv2nv12cX_fn yuv2nv12
+yuv2nv12cX_fn yuv2nv21
+%endif
+%endif ; ARCH_X86_64
+
+;-----------------------------------------------------------------------------
+; yuv2nv12cX, yuv2nv21cX and yuv2nv20cX with pmaddwd over pairs of taps
+;
+; Same arguments as above.  The taps are taken two at a time as in
+; yuv2planeX: the lines of a pair are interleaved by word and one pmaddwd
+; gives both products for a pixel, so per pair of taps and per mmsize/2
+; pixels this is two loads, two unpacks and two multiply-adds a plane,
+; against a pmovsxwd and a pmulld per tap and per 8 pixels in the version
+; above.  The sums wrap as the C ones do, so the result is exact.  An odd last
+; tap is paired with itself and a zero coefficient.
+;
+; The unpacks split the pixels by lane: the accumulators hold pixels 0-3 and
+; 4-7 of each lane of 8, which packssdw/packusdw put back in order.
+;
+; 8 bit: the dither, shifted up by 12, starts the accumulators: dither[i & 7]
+; for U and dither[(i + 3) & 7] for V, as the C.  It has period 8, so it is
+; the same in every lane.  packuswb leaves 8 U and 8 V per lane, which a
+; pshufb interleaves.
+;
+; 10 bit (NV20LE, NV12_10LE): rounded by 1 << 16, shifted by 17 and clipped
+; to 10 bits, in the low bits, as yuv2nv20cX_c.  punpck{l,h}wd interleave U
+; and V per lane, and a lane permute puts the halves in order.
+;
+; The avx2 version reads a whole unit of 16 pixels from each line for the
+; last, partial one as well; swscale leaves at least 66 bytes after each
+; line.  The avx512 version loads the last unit masked.  Both write exactly
+; dstW pixels.
+;-----------------------------------------------------------------------------
+
+%if ARCH_X86_64
+%macro NV_MADD 3 ; acc, src (clobbered), coeffs
+%if cpuflag(avx512icl)
+    vpdpwssd        %1, %2, %3
+%else
+    pmaddwd         %2, %3
+    paddd           %1, %2
+%endif
+%endmacro
+
+%macro NV_LOAD 3 ; dst, line, masked (by k1)
+%if %3
+    vmovdqu16       %1{k1}{z}, [%2+xq*2]
+%else
+    movu            %1, [%2+xq*2]
+%endif
+%endmacro
+
+; one unit of mmsize/2 pixels: interleaved output in m0 for 8 bit, in m1 (the
+; first half) and m2 for 10 bit
+%macro NV_UNIT 2 ; nv12/nv21/nv20, masked
+%ifidn %1, nv20
+    mova            m0, m4
+    mova            m1, m4
+    mova            m2, m4
+    mova            m3, m4
+%else
+    mova            m0, m4
+    mova            m1, m5
+    mova            m2, m6
+    mova            m3, m7
+%endif
+    test        fsized, 1
+    jz %%pairs
+    mov          lineq, [uq+gprsize*fsizeq-gprsize]
+    NV_LOAD         m8, lineq, %2
+    mov          lineq, [vq+gprsize*fsizeq-gprsize]
+    NV_LOAD         m9, lineq, %2
+    punpcklwd      m10, m8, m8
+    punpckhwd       m8, m8
+    punpcklwd      m11, m9, m9
+    punpckhwd       m9, m9
+    NV_MADD         m0, m10, m15
+    NV_MADD         m1, m8, m15
+    NV_MADD         m2, m11, m15
+    NV_MADD         m3, m9, m15
+%%pairs:
+    mov           cntd, fsized
+    and           cntd, ~1
+    jz %%done
+%%tap:
+    vpbroadcastd   m13, [filterq+2*cntq-4]  ; coeff[0], coeff[1]
+    mov          lineq, [uq+gprsize*cntq-2*gprsize]
+    NV_LOAD         m8, lineq, %2
+    mov          lineq, [uq+gprsize*cntq-gprsize]
+    NV_LOAD         m9, lineq, %2
+    punpcklwd      m10, m8, m9
+    punpckhwd       m8, m9
+    NV_MADD         m0, m10, m13
+    NV_MADD         m1, m8, m13
+    mov          lineq, [vq+gprsize*cntq-2*gprsize]
+    NV_LOAD         m9, lineq, %2
+    mov          lineq, [vq+gprsize*cntq-gprsize]
+    NV_LOAD        m11, lineq, %2
+    punpcklwd      m10, m9, m11
+    punpckhwd       m9, m11
+    NV_MADD         m2, m10, m13
+    NV_MADD         m3, m9, m13
+    sub           cntd, 2
+    jg %%tap
+%%done:
+%ifidn %1, nv20
+    psrad           m0, 17
+    psrad           m1, 17
+    psrad           m2, 17
+    psrad           m3, 17
+    packusdw        m0, m1                  ; U
+    packusdw        m2, m3                  ; V
+    pminuw          m0, m14
+    pminuw          m2, m14
+    punpcklwd       m1, m0, m2              ; px 0-3 of each lane
+    punpckhwd       m0, m2                  ; px 4-7
+%if mmsize == 64
+    mova            m2, m1
+    vpermt2q        m1, m16, m0
+    vpermt2q        m2, m17, m0
+%else
+    vperm2i128      m2, m1, m0, 0x31
+    vperm2i128      m1, m1, m0, 0x20
+%endif
+%else
+    psrad           m0, 19
+    psrad           m1, 19
+    psrad           m2, 19
+    psrad           m3, 19
+    packssdw        m0, m1                  ; U
+    packssdw        m2, m3                  ; V
+%ifidn %1, nv21
+    packuswb        m2, m0
+    pshufb          m0, m2, m14
+%else
+    packuswb        m0, m2
+    pshufb          m0, m14
+%endif
+%endif
+%endmacro
+
+%macro YUV2NV_FN 2 ; nv12/nv21/nv20, function name
+%if mmsize == 64
+cglobal %2, 8, 11, 18, fmt, dither, filter, fsize, u, v, dst, w, x, cnt, line
+%else
+cglobal %2, 8, 11, 16, fmt, dither, filter, fsize, u, v, dst, w, x, cnt, line
+%endif
+    movsxd      fsizeq, fsized
+%ifidn %1, nv20
+    vpbroadcastd    m4, [yuv2yuvX_10_start] ; 1 << 16
+    vpbroadcastw   m14, [yuv2yuvX_10_upper]
+%if mmsize == 64
+    movu           m16, [nv20_order]
+    movu           m17, [nv20_order+64]
+%endif
+%else
+    vpbroadcastq    m4, [ditherq]
+    vpalignr        m6, m4, m4, 3           ; dither[(i + 3) & 7]
+    pxor            m0, m0
+    punpcklbw       m4, m0
+    punpcklbw       m6, m0
+    punpckhwd       m5, m4, m0              ; U px 4-7
+    punpcklwd       m4, m0                  ; U px 0-3
+    punpckhwd       m7, m6, m0              ; V px 4-7
+    punpcklwd       m6, m0                  ; V px 0-3
+    pslld           m4, 12
+    pslld           m5, 12
+    pslld           m6, 12
+    pslld           m7, 12
+%if mmsize == 64
+    vbroadcasti32x4 m14, [nv_interleave]
+%else
+    vbroadcasti128 m14, [nv_interleave]
+%endif
+%endif
+    test        fsized, 1
+    jz .even
+    movzx        lined, word [filterq+2*fsizeq-2]
+    movd          xm15, lined
+    vpbroadcastd   m15, xm15                ; coeff, 0
+.even:
+    xor             xd, xd
+    test            wd, wd
+    jle .end
+    cmp             wd, mmsize/2
+    jl .tail
+
+.loop:
+    NV_UNIT         %1, 0
+%ifidn %1, nv20
+    movu   [dstq+xq*4], m1
+    movu   [dstq+xq*4+mmsize], m2
+%else
+    movu   [dstq+xq*2], m0
+%endif
+    add             xq, mmsize/2
+    sub             wd, mmsize/2
+    jz .end
+    cmp             wd, mmsize/2
+    jge .loop
+
+    ; 1 to mmsize/2-1 pixels left
+.tail:
+%if mmsize == 64
+    mov           cntd, -1
+    bzhi          cntd, cntd, wd
+    kmovd           k1, cntd
+    NV_UNIT         %1, 1
+%ifidn %1, nv20
+    kshiftrd        k2, k1, 16
+    vmovdqu32 [dstq+xq*4]{k1}, m1
+    vmovdqu32 [dstq+xq*4+mmsize]{k2}, m2
+%else
+    vmovdqu16 [dstq+xq*2]{k1}, m0
+%endif
+%else ; mmsize == 32
+    NV_UNIT         %1, 0
+%ifidn %1, nv20
+    lea           dstq, [dstq+xq*4]
+    test            wd, 8
+    jz .t4
+    movu        [dstq], m1
+    mova            m1, m2
+    add           dstq, 32
+.t4:
+    test            wd, 4
+    jz .t2
+    movu        [dstq], xm1
+    vextracti128   xm1, m1, 1
+    add           dstq, 16
+.t2:
+    test            wd, 2
+    jz .t1
+    movq        [dstq], xm1
+    psrldq         xm1, 8
+    add           dstq, 8
+.t1:
+    test            wd, 1
+    jz .end
+    movd        [dstq], xm1
+%else
+    lea           dstq, [dstq+xq*2]
+    test            wd, 8
+    jz .t4
+    movu        [dstq], xm0
+    vextracti128   xm0, m0, 1
+    add           dstq, 16
+.t4:
+    test            wd, 4
+    jz .t2
+    movq        [dstq], xm0
+    psrldq         xm0, 8
+    add           dstq, 8
+.t2:
+    test            wd, 2
+    jz .t1
+    movd        [dstq], xm0
+    psrldq         xm0, 4
+    add           dstq, 4
+.t1:
+    test            wd, 1
+    jz .end
+    pextrw      [dstq], xm0, 0
+%endif
+%endif
+.end:
+    RET
+%endmacro
+
+%if HAVE_AVX2_EXTERNAL
+INIT_YMM avx2
+YUV2NV_FN nv12, yuv2nv12cX_madd
+YUV2NV_FN nv21, yuv2nv21cX_madd
+YUV2NV_FN nv20, yuv2nv20cX
+%endif
+%if HAVE_AVX512ICL_EXTERNAL
+INIT_ZMM avx512icl
+YUV2NV_FN nv12, yuv2nv12cX
+YUV2NV_FN nv21, yuv2nv21cX
+YUV2NV_FN nv20, yuv2nv20cX
+%endif
+%endif ; ARCH_X86_64
