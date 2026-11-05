@@ -53,6 +53,8 @@ yuv2nv21_shuffle_mask: times 2 db 4,  0, 12,  8, \
 yuv2nv12_permute_mask: dd 0, 4, 1, 2, 3, 5, 6, 7
 yuv2nv12_dither_order: db 0, 3, 1, 4, 2, 5, 3, 6, 4, 7, 5, 0, 6, 1, 7, 2
 
+nv_interleave: db 0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15
+
 SECTION .text
 
 ;-----------------------------------------------------------------------------
@@ -1279,6 +1281,8 @@ cglobal %2, 8, 11, 16, fmt, dither, filter, fsize, u, v, dst, w, x, cnt, line
 
 %if HAVE_AVX2_EXTERNAL
 INIT_YMM avx2
+YUV2NV_FN nv12, yuv2nv12cX_madd
+YUV2NV_FN nv21, yuv2nv21cX_madd
 YUV2NV_FN nv20, yuv2nv20cX
 %endif
 %endif ; ARCH_X86_64
