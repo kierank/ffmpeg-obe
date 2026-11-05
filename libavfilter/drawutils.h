@@ -45,6 +45,38 @@ void ff_copy_rectangle(uint8_t *dst[4], int dst_linesize[4],
 
 #define MAX_PLANES 4
 
+/**
+ * Constants for blending one colour over a rectangle of 8-bit samples:
+ * dst = (dst * tau + s) >> 24, with s taken from s_even or s_odd by the
+ * parity of the byte offset within the row (both equal for planar data).
+ * t0..ns0 hold the same values split into 16-bit halves, two per dword
+ * (even byte in the low half), for the SIMD versions.
+ */
+typedef struct FFBlendRect8Params {
+    uint32_t t0;      ///< (tau & 0xffff), twice
+    uint32_t t1;      ///< (tau >> 16), twice
+    uint32_t s1;      ///< s_even >> 16 | (s_odd >> 16) << 16
+    uint32_t ns0;     ///< ~s_even & 0xffff | (~s_odd & 0xffff) << 16
+    uint32_t tau;
+    uint32_t s_even;
+    uint32_t s_odd;
+} FFBlendRect8Params;
+
+/**
+ * Constants for blending one colour through a 8-bit grey mask.
+ * For each byte of the row the mask is summed over 1 or 2 columns (by the
+ * kernel) and over the mask row and the row at +row2, then shifted right by
+ * shift; a = sum * alpha and dst = ((0x1010101 - a) * dst + a * src) >> 24.
+ */
+typedef struct FFBlendMask8Params {
+    uint32_t  alpha;
+    uint16_t  src[2];  ///< colour for even and odd bytes
+    uint32_t  shift;
+    uint32_t  reserved;
+    ptrdiff_t row2;    ///< offset of the second mask row (0: the same row)
+    ptrdiff_t adv;     ///< mask advance per destination row
+} FFBlendMask8Params;
+
 typedef struct FFDrawContext {
     const struct AVPixFmtDescriptor *desc;
     enum AVPixelFormat format;
@@ -56,7 +88,19 @@ typedef struct FFDrawContext {
     uint8_t hsub_max;
     uint8_t vsub_max;
     unsigned flags;
+    /* SIMD kernels for 8-bit planes, NULL if unavailable.
+     * w is in bytes, h in rows (both > 0). */
+    void (*blend_rect8)(uint8_t *dst, ptrdiff_t dst_linesize, int w, int h,
+                        const FFBlendRect8Params *p);
+    /* [hsub][pixelstep - 1]: hsub 0 reads one mask column per pixel,
+     * hsub 1 two; pixelstep 2 is interleaved chroma (one mask value for both
+     * bytes of a pixel). */
+    void (*blend_mask8[2][2])(uint8_t *dst, ptrdiff_t dst_linesize,
+                              const uint8_t *mask, int w, int h,
+                              const FFBlendMask8Params *p);
 } FFDrawContext;
+
+void ff_draw_init_x86(FFDrawContext *draw);
 
 typedef struct FFDrawColor {
     uint8_t rgba[4];

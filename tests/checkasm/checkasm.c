@@ -129,6 +129,7 @@ static const struct {
     #endif
 #endif
 #if CONFIG_AVFILTER
+        { "drawutils", checkasm_check_drawutils },
     #if CONFIG_BLEND_FILTER
         { "vf_blend", checkasm_check_blend },
     #endif
@@ -138,8 +139,12 @@ static const struct {
     #if CONFIG_COLORSPACE_FILTER
         { "vf_colorspace", checkasm_check_colorspace },
     #endif
+    #if CONFIG_INTERLACE_FILTER
+        { "vf_interlace", checkasm_check_vf_interlace },
+    #endif
 #endif
 #if CONFIG_SWSCALE
+    { "sw_input", checkasm_check_sw_input },
     { "sw_scale", checkasm_check_sw_scale },
 #endif
 #if CONFIG_AVUTIL

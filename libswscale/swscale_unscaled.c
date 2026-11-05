@@ -1409,12 +1409,16 @@ static int planarCopyWrapper(SwsContext *c, const uint8_t *src[],
         const uint8_t *srcPtr = src[plane];
         uint8_t *dstPtr = dst[plane] + dstStride[plane] * y;
         int shiftonly = plane == 1 || plane == 2 || (!c->srcRange && plane == 0);
+        const int dst_sp = plane == 1 && isSemiPlanarYUV(c->dstFormat);
 
         if (!dst[plane])
             continue;
+        // U and V share plane 1
+        if (dst_sp)
+            length *= 2;
         // ignore palette for GRAY8
-        if (plane == 1 && !dst[2]) continue;
-        if (!src[plane] || (plane == 1 && !src[2])) {
+        if (plane == 1 && !dst[2] && !dst_sp) continue;
+        if (!src[plane] || (plane == 1 && !src[2] && !isSemiPlanarYUV(c->srcFormat))) {
             if (is16BPS(c->dstFormat) || isNBPS(c->dstFormat)) {
                 fillPlane16(dst[plane], dstStride[plane], length, height, y,
                         plane == 3, desc_dst->comp[plane].depth_minus1,
@@ -1750,8 +1754,7 @@ void ff_get_unscaled_swscale(SwsContext *c)
         (isPlanarYUV(srcFormat) && isPlanarYUV(dstFormat) &&
          c->chrDstHSubSample == c->chrSrcHSubSample &&
          c->chrDstVSubSample == c->chrSrcVSubSample &&
-         dstFormat != AV_PIX_FMT_NV12 && dstFormat != AV_PIX_FMT_NV21 &&
-         srcFormat != AV_PIX_FMT_NV12 && srcFormat != AV_PIX_FMT_NV21))
+         !isSemiPlanarYUV(dstFormat) && !isSemiPlanarYUV(srcFormat)))
     {
         if (isPacked(c->srcFormat))
             c->swscale = packedCopyWrapper;

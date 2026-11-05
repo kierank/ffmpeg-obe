@@ -365,12 +365,13 @@ static int swscale(SwsContext *c, const uint8_t *src[],
     /* Copy the luma plane straight from the source instead of pushing it
      * through the identity filter, but only when that really is all luma
      * needs.  Skipping the horizontal pass also skips the alpha pass, and the
-     * copy does no format, depth or range conversion, so it may only be taken
-     * when none of those are wanted. */
+     * copy does no format, depth, endianness or range conversion, so it may
+     * only be taken when none of those are wanted. */
     const int lum_copy = !c->needs_hyscale && !c->needs_vyscale &&
                          !c->lumToYV12 && !c->readLumPlanar &&
                          !(CONFIG_SWSCALE_ALPHA && c->alpPixBuf) &&
                          c->srcBpc == c->dstBpc &&
+                         !isBE(c->srcFormat) == !isBE(c->dstFormat) &&
                          c->srcRange == c->dstRange;
 
     /* vars which will change and which we need to store back in the context */

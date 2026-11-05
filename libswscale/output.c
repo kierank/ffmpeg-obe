@@ -283,7 +283,7 @@ static void yuv2nv12cX_c(SwsContext *c, const int16_t *chrFilter, int chrFilterS
     const uint8_t *chrDither = c->chrDither8;
     int i;
 
-    if (dstFormat == AV_PIX_FMT_NV12)
+    if (dstFormat == AV_PIX_FMT_NV12 || dstFormat == AV_PIX_FMT_NV16)
         for (i=0; i<chrDstW; i++) {
             int u = chrDither[i & 7] << 12;
             int v = chrDither[(i + 3) & 7] << 12;
@@ -309,6 +309,30 @@ static void yuv2nv12cX_c(SwsContext *c, const int16_t *chrFilter, int chrFilterS
             dest[2*i]= av_clip_uint8(v>>19);
             dest[2*i+1]= av_clip_uint8(u>>19);
         }
+}
+
+/* NV20LE/NV12_10LE: yuv2planeX_10LE_c with U and V interleaved */
+static void yuv2nv20cX_c(SwsContext *c, const int16_t *chrFilter, int chrFilterSize,
+                         const int16_t **chrUSrc, const int16_t **chrVSrc,
+                         uint8_t *dest8, int chrDstW)
+{
+    uint16_t *dest = (uint16_t *)dest8;
+    const int shift = 11 + 16 - 10;
+    int i;
+
+    for (i = 0; i < chrDstW; i++) {
+        int u = 1 << (shift - 1);
+        int v = 1 << (shift - 1);
+        int j;
+
+        for (j = 0; j < chrFilterSize; j++) {
+            u += chrUSrc[j][i] * chrFilter[j];
+            v += chrVSrc[j][i] * chrFilter[j];
+        }
+
+        AV_WL16(&dest[2 * i],     av_clip_uintp2(u >> shift, 10));
+        AV_WL16(&dest[2 * i + 1], av_clip_uintp2(v >> shift, 10));
+    }
 }
 
 #define accumulate_bit(acc, val) \
@@ -2030,6 +2054,8 @@ av_cold void ff_sws_init_output_funcs(SwsContext *c,
         } else if (desc->comp[0].depth_minus1 == 9) {
             *yuv2planeX = isBE(dstFormat) ? yuv2planeX_10BE_c  : yuv2planeX_10LE_c;
             *yuv2plane1 = isBE(dstFormat) ? yuv2plane1_10BE_c  : yuv2plane1_10LE_c;
+            if (dstFormat == AV_PIX_FMT_NV20LE || dstFormat == AV_PIX_FMT_NV12_10LE)
+                *yuv2nv12cX = yuv2nv20cX_c;
         } else if (desc->comp[0].depth_minus1 == 11) {
             *yuv2planeX = isBE(dstFormat) ? yuv2planeX_12BE_c  : yuv2planeX_12LE_c;
             *yuv2plane1 = isBE(dstFormat) ? yuv2plane1_12BE_c  : yuv2plane1_12LE_c;
@@ -2041,7 +2067,8 @@ av_cold void ff_sws_init_output_funcs(SwsContext *c,
     } else {
         *yuv2plane1 = yuv2plane1_8_c;
         *yuv2planeX = yuv2planeX_8_c;
-        if (dstFormat == AV_PIX_FMT_NV12 || dstFormat == AV_PIX_FMT_NV21)
+        if (dstFormat == AV_PIX_FMT_NV12 || dstFormat == AV_PIX_FMT_NV21 ||
+            dstFormat == AV_PIX_FMT_NV16)
             *yuv2nv12cX = yuv2nv12cX_c;
     }
 

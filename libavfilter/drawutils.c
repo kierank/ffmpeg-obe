@@ -218,6 +218,8 @@ int ff_draw_init(FFDrawContext *draw, enum AVPixelFormat format, unsigned flags)
     for (i = 0; i < (desc->nb_components - !!(desc->flags & AV_PIX_FMT_FLAG_ALPHA && !(flags & FF_DRAW_PROCESS_ALPHA))); i++)
         draw->comp_mask[desc->comp[i].plane] |=
             1 << desc->comp[i].offset;
+    if (ARCH_X86)
+        ff_draw_init_x86(draw);
     return 0;
 }
 
@@ -432,6 +434,59 @@ static void blend_line16(uint8_t *dst, unsigned src, unsigned alpha,
     }
 }
 
+/* All bytes of the plane are 8-bit components that get blended. */
+static int simd_plane8(FFDrawContext *draw, int plane)
+{
+    int step = draw->pixelstep[plane], i;
+
+    if (step < 1 || step > 2 || draw->comp_mask[plane] != (1 << step) - 1)
+        return 0;
+    for (i = 0; i < step; i++) /* same depth lookup as the C path */
+        if (draw->desc->comp[i].depth > 8)
+            return 0;
+    return 1;
+}
+
+static void blend_rect8_params(FFBlendRect8Params *bp, unsigned alpha,
+                               const uint8_t *src, int step)
+{
+    unsigned tau = 0x1010101 - alpha;
+    unsigned se  = src[0] * alpha;
+    unsigned so  = src[step - 1] * alpha;
+
+    bp->t0     = (tau & 0xffff) * 0x10001;
+    bp->t1     = (tau >> 16) * 0x10001;
+    bp->s1     = (se >> 16) | (so >> 16) << 16;
+    bp->ns0    = (~se & 0xffff) | (~so & 0xffff) << 16;
+    bp->tau    = tau;
+    bp->s_even = se;
+    bp->s_odd  = so;
+}
+
+/* One band of rows with the same alpha: left partial pixel, full pixels,
+ * right partial pixel, as blend_line() does for each row. */
+static void blend_rect8_band(FFDrawContext *draw, uint8_t *p, int linesize,
+                             int h, unsigned alpha, const uint8_t *src,
+                             int step, int hsub, int w, int left, int right)
+{
+    FFBlendRect8Params bp;
+
+    if (left) {
+        blend_rect8_params(&bp, (left * alpha) >> hsub, src, step);
+        draw->blend_rect8(p, linesize, step, h, &bp);
+        p += step;
+    }
+    if (w > 0) {
+        blend_rect8_params(&bp, alpha, src, step);
+        draw->blend_rect8(p, linesize, w * step, h, &bp);
+        p += w * step;
+    }
+    if (right) {
+        blend_rect8_params(&bp, (right * alpha) >> hsub, src, step);
+        draw->blend_rect8(p, linesize, step, h, &bp);
+    }
+}
+
 void ff_blend_rectangle(FFDrawContext *draw, FFDrawColor *color,
                         uint8_t *dst[], int dst_linesize[],
                         int dst_w, int dst_h,
@@ -464,6 +519,26 @@ void ff_blend_rectangle(FFDrawContext *draw, FFDrawColor *color,
         y_sub = y0;
         subsampling_bounds(draw->hsub[plane], &x_sub, &w_sub, &left, &right);
         subsampling_bounds(draw->vsub[plane], &y_sub, &h_sub, &top, &bottom);
+        if (draw->blend_rect8 && simd_plane8(draw, plane)) {
+            const uint8_t *src = color->comp[plane].u8;
+            const int ls = dst_linesize[plane];
+
+            p = p0;
+            if (top) {
+                blend_rect8_band(draw, p, ls, 1, alpha >> 1, src, nb_comp,
+                                 draw->hsub[plane], w_sub, left, right);
+                p += ls;
+            }
+            if (h_sub > 0) {
+                blend_rect8_band(draw, p, ls, h_sub, alpha, src, nb_comp,
+                                 draw->hsub[plane], w_sub, left, right);
+                p += h_sub * ls;
+            }
+            if (bottom)
+                blend_rect8_band(draw, p, ls, 1, alpha >> 1, src, nb_comp,
+                                 draw->hsub[plane], w_sub, left, right);
+            continue;
+        }
         for (comp = 0; comp < nb_comp; comp++) {
             const int depth = draw->desc->comp[comp].depth;
 
@@ -609,6 +684,38 @@ static void blend_line_hv(uint8_t *dst, int dst_delta,
                     right, hband, hsub + vsub, xm);
 }
 
+/* One band of rows that read hband mask rows each, as blend_line_hv() does
+ * for each row; the partial pixels at either end read one mask column. */
+static void blend_mask8_band(FFDrawContext *draw, uint8_t *p, int linesize,
+                             const uint8_t *m, int mask_linesize, int h,
+                             int hband, int vsub, unsigned alpha,
+                             const uint8_t *src, int step, int hsub,
+                             int xm, int w, int left, int right)
+{
+    FFBlendMask8Params bp = {
+        .alpha = alpha,
+        .src   = { src[0], src[step - 1] },
+        /* a single row is read twice and the sum halved */
+        .shift = hsub + vsub + (hband == 1),
+        .row2  = hband == 2 ? mask_linesize : 0,
+        .adv   = (ptrdiff_t)mask_linesize << vsub,
+    };
+
+    m += xm;
+    if (left) {
+        draw->blend_mask8[0][step - 1](p, linesize, m, step, h, &bp);
+        p += step;
+        m += left;
+    }
+    if (w > 0) {
+        draw->blend_mask8[hsub][step - 1](p, linesize, m, w * step, h, &bp);
+        p += w * step;
+        m += w << hsub;
+    }
+    if (right)
+        draw->blend_mask8[0][step - 1](p, linesize, m, step, h, &bp);
+}
+
 void ff_blend_mask(FFDrawContext *draw, FFDrawColor *color,
                    uint8_t *dst[], int dst_linesize[], int dst_w, int dst_h,
                    const uint8_t *mask,  int mask_linesize, int mask_w, int mask_h,
@@ -642,6 +749,34 @@ void ff_blend_mask(FFDrawContext *draw, FFDrawColor *color,
         y_sub = y0;
         subsampling_bounds(draw->hsub[plane], &x_sub, &w_sub, &left, &right);
         subsampling_bounds(draw->vsub[plane], &y_sub, &h_sub, &top, &bottom);
+        if (l2depth == 3 && draw->hsub[plane] <= 1 && draw->vsub[plane] <= 1 &&
+            draw->blend_mask8[draw->hsub[plane]][nb_comp - 1] &&
+            simd_plane8(draw, plane)) {
+            const uint8_t *src = color->comp[plane].u8;
+            const int ls = dst_linesize[plane], vsub = draw->vsub[plane];
+
+            p = p0;
+            m = mask;
+            if (top) {
+                blend_mask8_band(draw, p, ls, m, mask_linesize, 1, top, vsub,
+                                 alpha, src, nb_comp, draw->hsub[plane],
+                                 xm0, w_sub, left, right);
+                p += ls;
+                m += top * mask_linesize;
+            }
+            if (h_sub > 0) {
+                blend_mask8_band(draw, p, ls, m, mask_linesize, h_sub, 1 << vsub,
+                                 vsub, alpha, src, nb_comp, draw->hsub[plane],
+                                 xm0, w_sub, left, right);
+                p += h_sub * ls;
+                m += h_sub * (mask_linesize << vsub);
+            }
+            if (bottom)
+                blend_mask8_band(draw, p, ls, m, mask_linesize, 1, bottom, vsub,
+                                 alpha, src, nb_comp, draw->hsub[plane],
+                                 xm0, w_sub, left, right);
+            continue;
+        }
         for (comp = 0; comp < nb_comp; comp++) {
             const int depth = draw->desc->comp[comp].depth;
 

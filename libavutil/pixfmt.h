@@ -326,8 +326,13 @@ enum AVPixelFormat {
      */
     AV_PIX_FMT_D3D11,
 
+    AV_PIX_FMT_NV12_10LE, ///< interleaved chroma YUV 4:2:0, 15bpp, (1 Cr & Cb sample per 2x2 Y samples), 10 bits in the LSBs of little-endian 16-bit words
+
     AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };
+
+/* lets callers #ifdef the fork's format */
+#define AV_PIX_FMT_NV12_10LE AV_PIX_FMT_NV12_10LE
 
 #if AV_HAVE_BIGENDIAN
 #   define AV_PIX_FMT_NE(be, le) AV_PIX_FMT_##be

@@ -98,7 +98,8 @@ static const enum AVPixelFormat formats_supported[] = {
     AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P,
     AV_PIX_FMT_YUV444P,  AV_PIX_FMT_YUV410P,  AV_PIX_FMT_YUVA420P,
     AV_PIX_FMT_GRAY8,    AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P,
-    AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ440P, AV_PIX_FMT_NONE
+    AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ440P, AV_PIX_FMT_NV12,
+    AV_PIX_FMT_NV16,     AV_PIX_FMT_NONE
 };
 
 static int query_formats(AVFilterContext *ctx)
@@ -122,11 +123,19 @@ static int config_out_props(AVFilterLink *outlink)
     AVFilterContext *ctx = outlink->src;
     AVFilterLink *inlink = outlink->src->inputs[0];
     InterlaceContext *s = ctx->priv;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
+    int ret;
 
     if (inlink->h < 2) {
         av_log(ctx, AV_LOG_ERROR, "input video height is too small\n");
         return AVERROR_INVALIDDATA;
     }
+
+    s->nb_planes = av_pix_fmt_count_planes(inlink->format);
+    if ((ret = av_image_fill_linesizes(s->linesize, inlink->format, inlink->w)) < 0)
+        return ret;
+    s->planeheight[1] = s->planeheight[2] = AV_CEIL_RSHIFT(inlink->h, desc->log2_chroma_h);
+    s->planeheight[0] = s->planeheight[3] = inlink->h;
 
     if (!s->lowpass)
         av_log(ctx, AV_LOG_WARNING, "Lowpass filter is disabled, "
@@ -162,14 +171,11 @@ static void copy_picture_field(InterlaceContext *s,
                                AVFilterLink *inlink, enum FieldType field_type,
                                int lowpass)
 {
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
-    int hsub = desc->log2_chroma_w;
-    int vsub = desc->log2_chroma_h;
     int plane, j;
 
-    for (plane = 0; plane < desc->nb_components; plane++) {
-        int cols  = (plane == 1 || plane == 2) ? -(-inlink->w) >> hsub : inlink->w;
-        int lines = (plane == 1 || plane == 2) ? AV_CEIL_RSHIFT(inlink->h, vsub) : inlink->h;
+    for (plane = 0; plane < s->nb_planes; plane++) {
+        int cols  = s->linesize[plane];
+        int lines = s->planeheight[plane];
         uint8_t *dstp = dst_frame->data[plane];
         const uint8_t *srcp = src_frame->data[plane];
 
