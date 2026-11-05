@@ -51,6 +51,7 @@ yuv2nv21_shuffle_mask: times 2 db 4,  0, 12,  8, \
                                  -1, -1, -1, -1, \
                                  -1, -1, -1, -1
 yuv2nv12_permute_mask: dd 0, 4, 1, 2, 3, 5, 6, 7
+yuv2nv12_dither_order: db 0, 3, 1, 4, 2, 5, 3, 6, 4, 7, 5, 0, 6, 1, 7, 2
 
 SECTION .text
 
@@ -917,10 +918,11 @@ yuv2plane1_fn 16, 5, 3
 %macro yuv2nv12cX_fn 1
 cglobal %1cX, 8, 11, 13, tmp1, dither, filter, filterSize, u, v, dst, dstWidth
 
-    mov tmp1q, qword [ditherq]
-    movq xm0, tmp1q
-    ror tmp1q, 24
-    movq xm1, tmp1q
+    ; resultLo holds u0 v0 u1 v1 u2 v2 u3 v3 and resultHi u4 v4 ... u7 v7,
+    ; and the C dithers u with dither[i & 7] and v with dither[(i + 3) & 7]
+    movq xm0, [ditherq]
+    pshufb xm0, xm0, [yuv2nv12_dither_order]
+    psrldq xm1, xm0, 8
 
     pmovzxbd m0, xm0
     pslld m0, m0, 12                        ; ditherLo
