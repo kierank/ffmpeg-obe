@@ -49,6 +49,29 @@ cglobal cpu_cpuid, 5,7
     RET
 
 ;-----------------------------------------------------------------------------
+; void ff_cpu_cpuid_count(int index, int count, int *eax, int *ebx, int *ecx, int *edx)
+;-----------------------------------------------------------------------------
+cglobal cpu_cpuid_count, 6,7
+    push rbx
+    push  r5
+    push  r4
+    push  r3
+    push  r2
+    mov  eax, r0d
+    mov  ecx, r1d
+    cpuid
+    pop   r4
+    mov [r4], eax
+    pop   r4
+    mov [r4], ebx
+    pop   r4
+    mov [r4], ecx
+    pop   r4
+    mov [r4], edx
+    pop  rbx
+    RET
+
+;-----------------------------------------------------------------------------
 ; void ff_cpu_xgetbv(int op, int *eax, int *edx)
 ;-----------------------------------------------------------------------------
 cglobal cpu_xgetbv, 3,7

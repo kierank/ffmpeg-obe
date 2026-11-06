@@ -109,6 +109,7 @@
 #define INLINE_AESNI(flags)         CPUEXT_SUFFIX(flags, _INLINE, AESNI)
 
 void ff_cpu_cpuid(int index, int *eax, int *ebx, int *ecx, int *edx);
+void ff_cpu_cpuid_count(int index, int count, int *eax, int *ebx, int *ecx, int *edx);
 void ff_cpu_xgetbv(int op, int *eax, int *edx);
 int  ff_cpu_cpuid_test(void);
 

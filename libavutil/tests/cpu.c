@@ -75,6 +75,7 @@ static const struct {
     { AV_CPU_FLAG_AESNI,     "aesni"      },
     { AV_CPU_FLAG_AVX512,    "avx512"     },
     { AV_CPU_FLAG_AVX512ICL, "avx512icl"  },
+    { AV_CPU_FLAG_AVXVNNI,   "avxvnni"    },
     { AV_CPU_FLAG_SLOW_GATHER, "slowgather" },
 #endif
     { 0 }

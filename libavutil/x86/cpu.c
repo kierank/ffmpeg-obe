@@ -33,6 +33,9 @@
 #define cpuid(index, eax, ebx, ecx, edx)        \
     ff_cpu_cpuid(index, &eax, &ebx, &ecx, &edx)
 
+#define cpuid_count(index, count, eax, ebx, ecx, edx) \
+    ff_cpu_cpuid_count(index, count, &eax, &ebx, &ecx, &edx)
+
 #define xgetbv(index, eax, edx)                 \
     ff_cpu_xgetbv(index, &eax, &edx)
 
@@ -46,6 +49,14 @@
         "xchg   %%"FF_REG_b", %%"FF_REG_S                       \
         : "=a" (eax), "=S" (ebx), "=c" (ecx), "=d" (edx)        \
         : "0" (index), "2"(0))
+
+#define cpuid_count(index, count, eax, ebx, ecx, edx)           \
+    __asm__ volatile (                                          \
+        "mov    %%"FF_REG_b", %%"FF_REG_S" \n\t"                \
+        "cpuid                       \n\t"                      \
+        "xchg   %%"FF_REG_b", %%"FF_REG_S                       \
+        : "=a" (eax), "=S" (ebx), "=c" (ecx), "=d" (edx)        \
+        : "0" (index), "2"(count))
 
 #define xgetbv(index, eax, edx)                                 \
     __asm__ (".byte 0x0f, 0x01, 0xd0" : "=a"(eax), "=d"(edx) : "c" (index))
@@ -148,6 +159,14 @@ int ff_get_cpu_flags_x86(void)
 #if HAVE_AVX2
         if ((rval & AV_CPU_FLAG_AVX) && (ebx & 0x00000020))
             rval |= AV_CPU_FLAG_AVX2;
+        /* AVX-VNNI: VEX vpdpbusd/vpdpwssd on xmm/ymm, leaf 7 sub-leaf 1 eax
+         * bit 4; needs the same OS state as AVX2 */
+        if ((rval & AV_CPU_FLAG_AVX2) && eax >= 1) {
+            int eax1, ebx1, ecx1, edx1;
+            cpuid_count(7, 1, eax1, ebx1, ecx1, edx1);
+            if (eax1 & 0x00000010)
+                rval |= AV_CPU_FLAG_AVXVNNI;
+        }
 #if HAVE_AVX512 /* F, CD, BW, DQ, VL */
         if ((xcr0_lo & 0xe0) == 0xe0) { /* OPMASK/ZMM state */
             if ((rval & AV_CPU_FLAG_AVX2) && (ebx & 0xd0030000) == 0xd0030000) {
