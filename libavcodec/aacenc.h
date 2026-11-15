@@ -134,6 +134,10 @@ typedef struct AACEncContext {
     struct {
         float *samples;
     } buffer;
+
+    int cbr_reservoir;               ///< CBR bit reservoir in bytes, -1 = ABR
+    int cbr_fullness;                ///< bits saved below the nominal frame size
+    int cbr_cutoff;                  ///< bandwidth limit (Hz) for this frame to fit the cap, 0 = none
 } AACEncContext;
 
 void ff_aac_dsp_init_x86(AACEncContext *s);

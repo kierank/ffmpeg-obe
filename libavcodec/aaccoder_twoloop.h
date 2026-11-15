@@ -199,6 +199,10 @@ static void search_for_quantizers_twoloop(AVCodecContext *avctx,
             s->psy.cutoff = bandwidth;
         }
 
+        /* CBR: narrowed for a frame that can't otherwise fit under the cap */
+        if (s->cbr_cutoff > 0)
+            bandwidth = FFMIN(bandwidth, s->cbr_cutoff);
+
         cutoff = bandwidth * 2 * wlen / avctx->sample_rate;
         pns_start_pos = NOISE_LOW_LIMIT * 2 * wlen / avctx->sample_rate;
     }
