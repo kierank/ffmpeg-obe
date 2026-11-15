@@ -480,6 +480,35 @@ static void put_bitstream_info(AACEncContext *s, const char *name)
     put_bits(&s->pb, 12 - padbits, 0);
 }
 
+/**
+ * Write fill elements (EXT_FILL) of at least the given number of bits.
+ */
+static void put_cbr_fill(AACEncContext *s, int bits)
+{
+    while (bits > 0) {
+        int cnt = av_clip((bits - 7 + 7) / 8, 0, 14);
+        int i;
+
+        if (cnt == 14 && bits > 7 + 8 * 14)
+            cnt = av_clip((bits - 15 + 7) / 8, 15, 15 + 254);
+
+        put_bits(&s->pb, 3, TYPE_FIL);
+        if (cnt < 15) {
+            put_bits(&s->pb, 4, cnt);
+        } else {
+            put_bits(&s->pb, 4, 15);
+            put_bits(&s->pb, 8, cnt - 14);
+        }
+        if (cnt) {
+            put_bits(&s->pb, 4, 0); // extension_type EXT_FILL
+            put_bits(&s->pb, 4, 0); // fill_nibble
+            for (i = 1; i < cnt; i++)
+                put_bits(&s->pb, 8, 0xA5);
+        }
+        bits -= (cnt < 15 ? 7 : 15) + 8 * cnt;
+    }
+}
+
 /*
  * Copy input samples.
  * Channels are reordered from libavcodec's default order to AAC order.
@@ -515,7 +544,9 @@ static int aac_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     SingleChannelElement *sce;
     IndividualChannelStream *ics;
     int i, its, ch, w, chans, tag, start_ch, ret, frame_bits;
-    int target_bits, rate_bits, too_many_bits, too_few_bits;
+    int target_bits, rate_bits = 0, too_many_bits, too_few_bits;
+    int cbr = s->cbr_reservoir >= 0 && !(avctx->flags & AV_CODEC_FLAG_QSCALE);
+    int cbr_max = INT_MAX, over_cap;
     int ms_mode = 0, is_mode = 0, tns_mode = 0, pred_mode = 0;
     int chan_el_counter[4];
     FFPsyWindowInfo windows[AAC_MAX_CHANNELS];
@@ -634,6 +665,7 @@ static int aac_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     if ((ret = ff_alloc_packet2(avctx, avpkt, 8192 * s->channels, 0)) < 0)
         return ret;
     frame_bits = its = 0;
+    s->cbr_cutoff = 0;
     do {
         init_put_bits(&s->pb, avpkt->data, avpkt->size);
 
@@ -789,13 +821,30 @@ static int aac_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         too_few_bits = too_few_bits - too_few_bits/8;
         too_many_bits = too_many_bits + too_many_bits/2;
 
+        /* CBR: a frame may only spend what the reservoir has saved on top of the nominal size.
+         * Leave room for the end element and byte alignment. */
+        if (cbr)
+            cbr_max = FFMIN(rate_bits + s->cbr_fullness, 6144 * s->channels - 3) - 10;
+        over_cap = frame_bits > cbr_max;
+
         if (   its == 0 /* for steady-state Q-scale tracking */
             || (its < 5 && (frame_bits < too_few_bits || frame_bits > too_many_bits))
-            || frame_bits >= 6144 * s->channels - 3  )
+            || frame_bits >= 6144 * s->channels - 3
+            || (over_cap && its < 32) )
         {
             float ratio = ((float)rate_bits) / frame_bits;
 
-            if (frame_bits >= too_few_bits && frame_bits <= too_many_bits) {
+            if (over_cap && its >= 8) {
+                /* lambda alone can't get under the cap (loud wideband content has a floor):
+                 * narrow the band for this frame instead, and leave lambda for the next ones */
+                int bw = s->cbr_cutoff > 0 ? s->cbr_cutoff :
+                         s->psy.cutoff > 0 ? s->psy.cutoff : avctx->sample_rate / 2;
+                s->cbr_cutoff = FFMAX(bw * 4 / 5, 2000);
+                ratio = 1.0f;
+            } else if (over_cap) {
+                /* aim at the cap, and keep going until under it */
+                ratio = FFMIN(sqrtf((float)cbr_max / frame_bits), 0.95f);
+            } else if (frame_bits >= too_few_bits && frame_bits <= too_many_bits) {
                 /*
                  * This path is for steady-state Q-scale tracking
                  * When frame bits fall within the stable range, we still need to adjust
@@ -811,7 +860,7 @@ static int aac_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
             s->lambda = FFMIN(s->lambda * ratio, 65536.f);
 
             /* Keep iterating if we must reduce and lambda is in the sky */
-            if (ratio > 0.9f && ratio < 1.1f) {
+            if (!over_cap && ratio > 0.9f && ratio < 1.1f) {
                 break;
             } else {
                 if (is_mode || ms_mode || tns_mode || pred_mode) {
@@ -832,6 +881,18 @@ static int aac_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
     if (s->options.ltp && s->coder->ltp_insert_new_frame)
         s->coder->ltp_insert_new_frame(s);
+
+    if (cbr) {
+        /* pad to keep the rate at nominal once the reservoir is full */
+        int res_bits = s->cbr_reservoir * 8;
+        int bits = (put_bits_count(&s->pb) + 3 + 7) & ~7; /* with the end element, aligned */
+        int fill = s->cbr_fullness + rate_bits - bits - res_bits;
+
+        if (fill > 0)
+            put_cbr_fill(s, fill);
+        bits = (put_bits_count(&s->pb) + 3 + 7) & ~7;
+        s->cbr_fullness = av_clip(s->cbr_fullness + rate_bits - bits, 0, res_bits);
+    }
 
     put_bits(&s->pb, 3, TYPE_END);
     flush_put_bits(&s->pb);
@@ -1062,6 +1123,7 @@ static const AVOption aacenc_options[] = {
     {"aac_tns", "Temporal noise shaping", offsetof(AACEncContext, options.tns), AV_OPT_TYPE_BOOL, {.i64 = 1}, -1, 1, AACENC_FLAGS},
     {"aac_ltp", "Long term prediction", offsetof(AACEncContext, options.ltp), AV_OPT_TYPE_BOOL, {.i64 = 0}, -1, 1, AACENC_FLAGS},
     {"aac_pred", "AAC-Main prediction", offsetof(AACEncContext, options.pred), AV_OPT_TYPE_BOOL, {.i64 = 0}, -1, 1, AACENC_FLAGS},
+    {"aac_cbr_reservoir", "CBR with a bit reservoir of this many bytes, -1 for ABR", offsetof(AACEncContext, cbr_reservoir), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 6144, AACENC_FLAGS},
     {NULL}
 };
 
